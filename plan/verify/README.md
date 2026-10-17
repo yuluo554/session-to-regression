@@ -343,3 +343,20 @@ git 若在克隆时归一了字节，`s2r bench` 的台账门会当场红。这�
 * **真实语料上的生成路径结论 = 未取得**：合成基准 10/10 覆盖生成层（含候选断言与锚点），
   但真实会话受"无 before 全文"限制，**本机抽验里没有出现一条可生成的真实 episode**
   ——这条限制写在 README 的"已知限制"里，也是 M5 RED/GREEN 必须先解决 `--repo` 语义的原因。
+
+### 5. 干净 clone 复核（M4，仓库树外，`--no-local`）
+
+判据重点：**重生成后的语料台账 sha256 在克隆后是否仍然一致**——本轮真值新增了 `expect_generated`
+（`data/bench/**` 已重生成），若 git 在克隆时归一了字节，`s2r bench` 的台账门会当场红。
+所以"clone 里跑 `s2r bench` 通过"是"`-text` 冻结仍然生效"的端到端证明。
+
+| 命令（clone 目录内） | 退出码 | 语义判定 |
+|---|---|---|
+| `py -3.8 -X utf8 tools/gen_bench.py --check` | 0 | ✅ 符合：语料/真值/磁盘夹具再生成**逐字节一致**（10 样本，rng_draws=5） |
+| `PYTHONPATH=src py -3.8 -X utf8 -m s2r bench` | 0 | ✅ 符合：`ok`（10/10、误报 0）——**台账 sha256 与克隆后字节一致 = `-text` 冻结生效**（含新真值） |
+| `py -3.8 -X utf8 -m pytest -q` | 0 | ✅ 符合：**294 项通过**（与作者机器同收集数） |
+| `py -3.12 -X utf8 -m pytest -q` | 0 | ✅ 符合：**294 项通过** |
+| `PYTHONPATH=src py -3.8 -X utf8 -m s2r generate "data/bench/claude/multi-bug-1.jsonl#4" --out-dir <树外临时目录>` | 0 | ✅ 符合：新交付命令在**新克隆**里直接可用（生成 1 个骨架，产物落树外，clone 内 `git status` 干净） |
+| `py -3.8 -X utf8 tools/fix_eol.py --check` | 0 | ✅ 符合：88 个文件 0 问题 |
+| `PYTHONPATH=src py -3.12 -X utf8 -m s2r selftest` | 0 | ✅ 符合：口径文件在 clone 内定位成功、自检项全 ok |
+| 逐文件字节扫描 `\r\n`（93 个文本文件） | 0 | ✅ 符合：仅 `.pytest_cache/**` 带 CRLF（pytest 自身缓存产物，EOL 门已按跳过规则排除——门报的是"扫描面 0 问题"，与"树里一个 CR 字节都没有"不是同一命题） |
