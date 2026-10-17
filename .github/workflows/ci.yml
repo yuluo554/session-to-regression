@@ -6,8 +6,8 @@ name: ci
 # * 所有断言都落成 tools/ 下的脚本或 pytest，**不写内联 shell**：内联脚本受 shell/缩进/行尾影响，
 #   本机无法复跑，而脚本形态可以（`python tools/ci_smoke.py` 就是本机同一条命令）。
 # * PYTHONUTF8=1 是编码加固的第三层（第一层在程序入口 reconfigure，第二层在子进程显式 encoding）。
-# * 里程碑落地时：同一次提交里改 tools/ci_smoke.py 的期望退出码，并退役 README 退出码表里的
-#   "阶段未就绪"那一行（tests/test_smoke_coverage.py 会替我们提醒）。
+# * 里程碑落地时：同一次提交里改 tools/ci_smoke.py 的期望退出码。M5 起全部命令都已按真实值登记，
+#   退出码 4「阶段未就绪」整项退役——README 退出码表只剩 0/1/2/3（`tests/test_smoke_coverage.py` 守着）。
 
 on: [push, pull_request, workflow_dispatch]
 
