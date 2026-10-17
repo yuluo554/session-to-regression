@@ -61,7 +61,7 @@
 |---|---|---|---|---|
 | M1 双 harness 读取器（Claude jsonl + Codex rollout → 统一事件流） | `~/.claude/projects/**/*.jsonl` ✅；`~/.codex/sessions/**/*.jsonl` ✅ 220 文件 | 随包，零网络；路径可覆盖（含环境变量） | 合成语料逐字段对账（8/8）+ 同日志双跑逐字节一致 + 未知格式/版本指纹显式报错 | ✅ M1 |
 | M2 episode 切分器（确定性规则 + 打分） | 事件流 + 语义词表（配置一处定义） | 随包 | 合成语料逐例对账（多 bug / 未修复 / 先成后败 / 仅提问 / 只改文档 / 无 before）；权重与阈值只读配置 | ✅ M2 |
-| M3 差分还原器（logs-only，不依赖 git） | `originalFile`+非空 `structuredPatch` ✅ 全量 305 条里 223 条非空 / 107 条带全文；Edit `old_string` ✅ 252/252；Codex `FileChange.unified_diff` ✅ 1892 条（含 2347 个变更对象）与 `apply_patch` ✅ 104 次 | 随包；磁盘基线**可选**（显式 `--repo`，只读） | 合成基准 before/after **逐字符**对账（逐文件 source/confidence/status 点名）+ 同日志双跑逐字节一致 | ✅ M3 |
+| M3 差分还原器（logs-only，不依赖 git） | `originalFile`+非空 `structuredPatch` ✅ 全量 305 条里 223 条非空 / 107 条带全文；Edit `old_string` ✅ 252/252；Codex `FileChange.unified_diff` ✅ 1892 条（含 2347 个变更对象）与 `apply_patch` ✅ 104 次 | 随包；磁盘基线**可选**（显式 `--repo`，只读） | 合成基准 before/after **逐字符**对账（逐文件 source/confidence/status 点名）+ 同日志双跑逐字节一致 + 真实日志只读抽验（聚合读数见 [verify/README.md](verify/README.md) §M3.5） | ✅ M3 |
 | M4 pytest 骨架生成器（模板 + AST，零模型） | M3 输出 + 仓库测试约定探测 | 随包；生成物落用户仓库 `tests/regression/` | 合成基准生成内容对账；同 episode 逐字节稳定；约定探测失败走保守默认并标注 | ⬜ 待 M4 |
 | M5 RED 验证器 + `manifest.json` | 隔离临时副本 + pytest | 随包；pytest 为运行期可选依赖（缺失 exit 3） | before 必失败 / after 必通过双跑；未通过项不进正式目录；退出码四语义测试 | ⬜ 待 M5 |
 | 合成会话基准 + 植入真值 | 程序化生成 Claude / Codex 两种格式，假项目名 / 假路径白名单 | 随包零外部依赖、零 API（参照实现在包内 `s2r.benchdata`） | 生成器同步标注真值（含逐文件 before/after 与磁盘基线夹具）；覆盖度门槛写 manifest；`tools/gen_bench.py --check` 位级一致；`s2r bench` 双边门（检出 10/10、误报 0）+ **七探活** | ✅ M1–M3 |

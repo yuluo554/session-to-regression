@@ -316,6 +316,7 @@
 | M3-3 | 空 `structuredPatch`（实测 82 条）**不含 diff** → 判据必须"键存在**且非空**" | 空表样本走 ② 子串定位；语料 `ambiguous-old-string-1` 就是"有 before 全文但无 hunk"的形态（实测里 `type` 键多缺失，与 E1 一致） |
 | M3-4 | `apply_patch` 文本**不携带行号**（`@@` 后无区间），而 `FileChange.unified_diff` 带 `@@ -a,b +c,d @@` | 定位策略分两级：先按声明行号、再按内容唯一定位；`aligned_by` 如实记录用的是哪一种；都不成立 → 拒绝（`hunk_mismatch` / `ambiguous_match`） |
 | M3-5 | 会话里的 `apply_patch` 与 `FileChange` **无法配对**（后者没有 call_id，M1 已定"不按时间序猜"） | 同文件两条通道都在时按**通道优先级**取结构化那条（首选），另一条只记进 `evidence.channels`，不叠加成两个"改动" |
+| M3-6 | **真实日志只读抽验**（本机按体积抽 37 份 Claude / 20 份 Codex，聚合读数见 `plan/verify/README.md` §M3.5）：Claude 侧 11/23 个文件拿到全文 before（全部来自 `originalFile` + 非空 `structuredPatch`，置信度 `high`），其余 12 个（缺 `originalFile` 的 Edit + `Write` 新建）在不给 `--repo` 时落 `no_before_image`；Codex 侧 28 个里 25 个是**新建文件**（`content` 通道，天然无 before）、3 个 `unified_diff` 无基线落 `partial` | 与 M3-1 互相印证：**日志里没有 before 全文时绝不硬造**；"磁盘基线可选对齐"是这条路径的正当出口。抽样读数只作演示约束，**不是交付承诺**，也不支撑比率结论 |
 
 **口径增量（M3 起生效）**：见 `plan/07` §五 的 **K24 / K25 / K26**（四态不折叠、置信度由来源决定 +
 磁盘读取显式开关、还原对账面逐文件逐字段且 `before_after` 从 pending 摘除）。

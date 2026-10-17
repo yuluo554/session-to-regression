@@ -247,3 +247,26 @@ git 若在克隆时归一了字节，`s2r bench` 的台账门会当场红。这�
 | `py -3.8 -X utf8 tools/fix_eol.py --check` | 0 | ✅ 符合：84 个文件 0 问题 |
 | `PYTHONPATH=src py -3.12 -X utf8 -m s2r selftest` | 0 | ✅ 符合：口径文件在 clone 内定位成功、6 项自检 ok |
 | 逐文件字节扫描 `\r\n`（82 个文本文件） | 0 | ✅ 符合：仅 `.pytest_cache/README.md` 带 CRLF（pytest 自身缓存产物，EOL 门已按跳过规则排除，与"树里一个 CR 字节都没有"不是同一命题） |
+
+### 5. 真实日志只读抽验（M3，本机全量目录内按体积抽样）
+
+**方法**：在 `~/.claude/projects` 与 `~/.codex/sessions` 内按**文件体积升序**取前若干份（Claude 40 / Codex 20，
+跳过 >20 MB 的），逐份 `read_file` → `reconstruct_session(repo=None)`。**只读探针落在仓库树外**，
+**只打印聚合计数**（不打印路径、内容、session id），不写任何文件。
+
+| 来源 | 读入 | 有写文件证据 | 还原文件 | 状态分布 | 来源分布 | 置信度 |
+|---|---|---|---|---|---|---|
+| Claude | 37 份 | 11 份 | 23 个 | `ok 11` / `no_before_image 12` | `claude_structured_patch 11` / `claude_old_string 9` / `claude_write_content 3` | `high 11` / `none 12` |
+| Codex | 20 份 | 7 份 | 28 个 | `no_before_image 25` / `partial 3` | `codex_file_change_content 25` / `codex_unified_diff 3` | `none 25` / `low 3` |
+
+**这三行读数怎么解读（写清楚，别包装成"效果很好"）**：
+
+* **① 路径在真实日志里真的成立**：Claude 侧 11 个文件的全文 before 全部来自
+  `originalFile` + 非空 `structuredPatch`，且都判到 `high` 置信度——与 `data/README.md` §6.1 的
+  全量计数（305 条带 `structuredPatch`、其中 223 条非空）方向一致；
+* **不传 `--repo` 时，缺 `originalFile` 的 Edit 只能落 `no_before_image`**（Claude 9 个）——
+  日志里确实没有"修改前全文"这一项，这正是"磁盘基线可选对齐"存在的理由，不是实现缺陷（**没有伪造出前后文**）；
+* **Codex 侧全部落在 `no_before_image` / `partial`**：抽样里 25 个是**新建文件**（`content` 通道，
+  天然没有 before），3 个是 `unified_diff` 但未给磁盘基线 → 与 §6.10 的 M3-1 结论互相印证；
+* **样本量与抽样方式如实标注**：这是按体积抽的小样本、只作演示约束，**不是**交付承诺，
+  也不支撑任何比率结论（真实样本量声明见 `data/README.md` §2.3）。
