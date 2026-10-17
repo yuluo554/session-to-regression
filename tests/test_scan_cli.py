@@ -60,8 +60,9 @@ def test_scan_writes_stable_events_and_reports(tmp_path, capsys):
     assert "2 条事件" in captured.out
 
     payload = json.loads(serialize.read_text(out))
-    assert payload["schema_version"] == events.EVENT_SCHEMA_VERSION
-    assert set(payload) == {"schema_version", "files", "sessions", "events", "notes"}
+    assert payload["schema_version"] == readers.SCAN_SCHEMA_VERSION
+    assert set(payload) == {"schema_version", "files", "sessions", "events", "episodes", "filtered", "skipped", "failed", "notes"}
+    assert payload["schema_version"] == 2
     assert len(payload["events"]) == 2
     assert payload["sessions"][0]["session_id"] == SESSION
 

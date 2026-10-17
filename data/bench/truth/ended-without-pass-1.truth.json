@@ -24,7 +24,11 @@
       "demo-user, bug: cli crashes on empty input in /demo/alpha/src/calc.py"
     ]
   },
+  "expect_episode_statuses": [
+    "ended_without_pass"
+  ],
   "expect_episodes": 1,
+  "expect_filter_reasons": [],
   "input_file": "codex/ended-without-pass-1.jsonl",
   "sample": "ended-without-pass-1",
   "session_id": "sess-demo-0002"

@@ -22,9 +22,12 @@ from typing import Any, Dict, Iterator, List, Mapping, Optional, Sequence, Tuple
 
 from .. import config as config_mod
 from .. import events, serialize
-from ..errors import InputUnavailable, UnsupportedFormat
+from ..errors import InputUnavailable, NotASessionLog, S2RError, UnsupportedFormat
 
 JSONL_SUFFIX = ".jsonl"
+
+#: scan 输出 schema 版本（M2 起附 `episodes[]` / `filtered[]` → 升版）
+SCAN_SCHEMA_VERSION = 2
 
 #: 单文件读取结果
 class FileRead:
@@ -61,6 +64,13 @@ class ScanResult:
     def __init__(self) -> None:
         self.files: List[FileRead] = []
         self.notes: Counter = Counter()
+        #: M2 起由 `episode.split()` 填入（episodes 与丢弃候选都要可见）
+        self.episodes: List[Any] = []
+        self.filtered: List[Dict[str, Any]] = []
+        #: 批量扫描的**失败隔离**分区：跳过（非会话日志）与失败（读不了）都要显式可见，
+        #: 绝不静默吞掉——"没判定"与"判定为空"是两件事
+        self.skipped: List[Dict[str, Any]] = []
+        self.failed: List[Dict[str, Any]] = []
 
     @property
     def events(self) -> List[events.Event]:
@@ -72,10 +82,14 @@ class ScanResult:
     def to_dict(self) -> Dict[str, Any]:
         merged = sorted(self.events, key=events.event_sort_key)
         return {
-            "schema_version": events.EVENT_SCHEMA_VERSION,
+            "schema_version": SCAN_SCHEMA_VERSION,
             "files": [item.to_dict() for item in self.files],
             "sessions": _session_summaries(merged),
             "events": [event.to_dict() for event in merged],
+            "episodes": [item.to_dict() for item in self.episodes],
+            "filtered": list(self.filtered),
+            "skipped": list(self.skipped),
+            "failed": list(self.failed),
             "notes": [{"code": code, "count": count} for code, count in sorted(self.notes.items())],
         }
 
@@ -246,6 +260,16 @@ def read_file(path: Path, limits: Mapping[str, Any]) -> FileRead:
         raise UnsupportedFormat("文件没有任何合法 JSON 行: {}".format(path))
 
     probe_records = [item[2] for item in probe]
+    from . import claude as claude_reader
+
+    if claude_reader.is_state_only(probe_records):
+        observed = tuple(sorted({str(item.get("type")) for item in probe_records}))
+        raise NotASessionLog(
+            "不是会话日志（探测窗口内全是 harness 状态行）: {}".format(path),
+            observed_types=observed,
+            hint="目录扫描会按件跳过它；若这是你要读的文件，请确认路径",
+        )
+
     result.source = events.detect_harness(probe_records)
     result.format_version = events.detect_format_version(result.source, _version_views(result.source, probe_records))
     result.harness_version = _harness_version(result.source, probe_records)
@@ -290,14 +314,36 @@ def _harness_version(source: str, records: Sequence[Mapping[str, Any]]) -> str:
     return events.UNKNOWN
 
 
-def scan(inputs: Sequence[str], limits: Mapping[str, Any], roots: Sequence[Optional[str]] = ()) -> ScanResult:
-    """扫描一批输入，返回合并后的 ScanResult（跨文件注记也已聚合）。"""
+def scan(inputs: Sequence[str], limits: Mapping[str, Any], roots: Sequence[Optional[str]] = (), cfg: Optional[Mapping[str, Any]] = None) -> ScanResult:
+    """扫描一批输入，返回合并后的 ScanResult（跨文件注记也已聚合）。
+
+    传入 ``cfg`` 时顺带跑 M2 的 episode 切分（切分依赖口径文件里的词表/权重/阈值，
+    所以**必须**由调用方把配置传进来，读取器自己不读文件）。
+    """
     result = ScanResult()
     for path in collect_jsonl(inputs, roots):
-        file_read = read_file(path, limits)
+        try:
+            file_read = read_file(path, limits)
+        except NotASessionLog as exc:
+            # 跳过（非会话日志）：可见、不计失败——真实目录里这类文件占多数
+            result.skipped.append({"path": str(path), "code": exc.code, "reason": exc.message})
+            continue
+        except UnsupportedFormat as exc:
+            # 读不了（格式不认识/坏件）：**单件异常不中断整批**，逐件列出原因
+            result.failed.append({"path": str(path), "code": exc.code, "reason": exc.message, "missing_keys": list(exc.missing_keys)})
+            continue
+        except S2RError as exc:
+            result.failed.append({"path": str(path), "code": exc.code, "reason": exc.message})
+            continue
         result.files.append(file_read)
         for code, count in file_read.notes.items():
             result.notes[code] += count
+    if cfg is not None:
+        from .. import episode as episode_mod
+
+        split = episode_mod.split(result.events, cfg, session_files=episode_mod.session_file_map(result))
+        result.episodes = split.episodes
+        result.filtered = split.filtered
     return result
 
 

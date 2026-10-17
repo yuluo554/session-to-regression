@@ -25,11 +25,15 @@ min_score = 5
 id_format = "{session_id}#{first_fix_seq}"
 # 会话安全阀：超限显式报错，绝不静默截断（截断会让 episode 起点漂移）
 max_events_per_session = 200000
-max_line_bytes = 4194304
+# 单行上限 16 MiB：本机实测 Codex rollout 的单行可达 ~8.8 MB（4 MiB 上限会排除 5/220 个真实会话，
+# 实测记录见 data/README.md §六.9）——上限是防内存爆掉的安全阀，不是"正常规模"的判据
+max_line_bytes = 16777216
 # tool_result 文本保留上限（超出即截断，并在事件里显式标 truncated=true）
 max_result_chars = 4000
 # 格式版本指纹探测：读前 N 行找首个命中指纹的记录
 version_probe_lines = 200
+# 文档后缀：改到的文件**全部**属这类后缀时，episode 按「只改文档」丢弃（不给 code_change 权重）
+doc_suffixes = [".md", ".markdown", ".rst", ".txt", ".adoc"]
 
 [verify]
 # M5 RED/GREEN 双验证（临时副本内进行，不碰用户工作区）
@@ -51,3 +55,7 @@ assert_placeholder = "# TODO: assert"
 # 语义词表：唯一来源在本文件；源码与测试不得内嵌词面（守门测试锁死）。
 bug_terms = ["bug", "报错", "错误", "失败", "崩溃", "不工作", "复现", "异常", "broken", "doesn't work", "fail"]
 failure_signals = ["FAILED", "AssertionError", "Traceback", "Exit code"]
+# 测试命令标记（M2 判定 episode 终点用）：命令文本里出现任一标记即视为测试命令
+test_command_markers = ["pytest", "unittest", "npm test", "go test", "cargo test", "make test"]
+# 通过标记（Claude 侧没有退出码，靠结果文本判"转为通过"）
+test_pass_markers = ["passed", "PASSED", "ok", "0 failed"]

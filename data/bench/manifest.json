@@ -8,7 +8,10 @@
     "tools_used",
     "files_touched",
     "exit_codes",
-    "user_report_fragments"
+    "user_report_fragments",
+    "filter_reasons",
+    "episode_statuses",
+    "episode_count"
   ],
   "coverage": {
     "min_count_by_type": {
@@ -38,7 +41,9 @@
     "codex"
   ],
   "pending_facts": {
-    "episodes": "M2：episode 切分落地后由 bench 对账（当前记 pending_m2，不静默当通过）"
+    "before_after": "M3：before/after 还原落地后由 bench 逐字符对账",
+    "generated_tests": "M4：pytest 骨架生成落地后由 bench 对账生成内容",
+    "red_green": "M5：RED/GREEN 双验证落地后由 bench 对账退出码"
   },
   "privacy": {
     "note": "全部为假值；假绝对路径只保留通用盘符形态，后缀段为假项目名",
@@ -67,7 +72,7 @@
       "sample": "happy-path-1",
       "sha256": "96f3ff5c99fe8b8815b6050beef872ca540b1d821bbfe305e47163ceba8cb84a",
       "truth": "truth/happy-path-1.truth.json",
-      "truth_sha256": "0e4d947379996772a1fb4395860eeb0d562982e8f1420494580dd00bbf905aaa"
+      "truth_sha256": "787f691fc3b12a3aa118f5869a20cf0236b7e5232159e00b1033af65d316fc08"
     },
     {
       "bytes": 2320,
@@ -77,7 +82,7 @@
       "sample": "ended-without-pass-1",
       "sha256": "6009ddedf3374eca0d6ed2f175798ebf6762e0b3f959dea6f1757e853d4db062",
       "truth": "truth/ended-without-pass-1.truth.json",
-      "truth_sha256": "872ecba765cce1813b728e0e558231a8679b72de99a478978b1770eb661feafe"
+      "truth_sha256": "47a0f60f2ce3a3c7b2f4e8b3c36cd6fbef184b055acc8349b5ea19593806b7cd"
     },
     {
       "bytes": 6164,
@@ -87,7 +92,7 @@
       "sample": "multi-bug-1",
       "sha256": "89f0d1e74d72ce39df5a61210cc41266cbe81782d333380c06617c95b54b80c9",
       "truth": "truth/multi-bug-1.truth.json",
-      "truth_sha256": "bd3e6d6920edaef3f8cc36c1839b23f9e3ddf4f4f594cba35084c9bfe17cc16e"
+      "truth_sha256": "0d00893040b0789520e503a4efe71354818cc74617047a12a384c0a365bb2322"
     },
     {
       "bytes": 1720,
@@ -97,7 +102,7 @@
       "sample": "no-failure-signal-1",
       "sha256": "657fdeba912fbb80070c4779d599ecfbc54729af144a8a4070eae9cd3b2f0298",
       "truth": "truth/no-failure-signal-1.truth.json",
-      "truth_sha256": "83d90dc49ada19b1511eda9fb23c0afaaa40dfa1da48211c9e0445690411030c"
+      "truth_sha256": "5eb0349486034775e23d5b4d2cfe36739d9e046d8536b9280f1ea0e03c0791e4"
     },
     {
       "bytes": 2576,
@@ -107,7 +112,7 @@
       "sample": "doc-only-1",
       "sha256": "9691be1e64dd29ec54a154dfea012717b0926ce465d0852c27e728c92a31cb11",
       "truth": "truth/doc-only-1.truth.json",
-      "truth_sha256": "8e8ceb552809f955ea339fc5085c7b1e27b062740e513a6ad875a51abd601477"
+      "truth_sha256": "692acd36cc0ea1e0292613ea01d890e37f98c567d7afa4b2d088a7b8cefe58e6"
     },
     {
       "bytes": 2764,
@@ -117,17 +122,17 @@
       "sample": "ambiguous-old-string-1",
       "sha256": "787be95f82d496ae1ed2338e2c706bcce9a04f727c4abb70c812d8d23c0e2ead",
       "truth": "truth/ambiguous-old-string-1.truth.json",
-      "truth_sha256": "962983940b3f267f87bbc24ca6262a985fe57fe8b6440711e5432be8aa4b7940"
+      "truth_sha256": "050c2de21d862f4ed559900b15a6325ea680e7e5a30a3cbe4c3bca12e02d2b99"
     },
     {
-      "bytes": 1461,
+      "bytes": 2559,
       "episode_type": "new_file_write",
       "file": "claude/new-file-write-1.jsonl",
       "harness": "claude",
       "sample": "new-file-write-1",
-      "sha256": "e00723053d445497198df27905f78f8de38521abaf0bd352eb725bf03dc5d76e",
+      "sha256": "c07ba05f3d9bfd3490803d3e026ab6bd1ffb5375da7d0bcc950fb453359205e4",
       "truth": "truth/new-file-write-1.truth.json",
-      "truth_sha256": "b1ce243f68b9deafba5b40b145ec9acd703de1db6053145b8296c2ccf09691a9"
+      "truth_sha256": "73b6dd39e238a12afc286e49de7880b55ae767e1d7540d4510a274b326a00ce5"
     },
     {
       "bytes": 146,
@@ -137,7 +142,7 @@
       "sample": "unsupported-format-1",
       "sha256": "dd1c08957d9c6a17ab74c7f4608988d7998c99be78fb78a251ff2bdd4579396a",
       "truth": "truth/unsupported-format-1.truth.json",
-      "truth_sha256": "56e4fc5027fdcb8f7e49d269fed35aa813c3fb68854795c7d1e449465bc2aa09"
+      "truth_sha256": "ca4ee2a0360608ca6c4fb1f3dea7fc0e4d57efc011c3d258abe1b27996f44fa5"
     }
   ],
   "seed": 20261017,

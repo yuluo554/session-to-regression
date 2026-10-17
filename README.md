@@ -9,9 +9,10 @@
 > 痛点来自公开抱怨：coding agent 常常「让测试变绿」而不是「让代码变对」，甚至把上周的修复改回去
 > （HN item 49981230，2026-10-06）。修复是一次性的，回归是永久的——本工具把每一次修复钉成回归测试。
 
-**状态（2026-10-17）**：**M1 数据先行已交付**——双 harness 读取器（Claude / Codex → 统一事件流）、
-路径自适应发现、合成会话基准 + 程序化植入真值、`scan` / `bench` 两条命令跑通。
-**M2–M5 尚未实现**：`reconstruct` / `generate` / `verify` / `run` 现在只报 `stage_not_ready` 并退出 4，
+**状态（2026-10-17）**：**M1（双 harness 读取器）+ M2（episode 切分）已交付**——读本机日志、
+按 `payload.type` 归一事件流、切出"报 bug → 失败 → 改文件"的 episode 并确定性打分过滤，
+合成语料基准逐字段对账（含 episode 层）。
+**M3–M5 尚未实现**：`reconstruct` / `generate` / `verify` / `run` 现在只报 `stage_not_ready` 并退出 4，
 **不产出任何结果**（也不伪造空结果）。未交付能力不会出现在本文档的"可用命令"里。
 
 ---
@@ -35,13 +36,15 @@ s2r config path            # 定位唯一数值口径文件
 s2r config show            # 打印全部口径值（人读）
 s2r config show --json     # 机读 JSON，可直接喂给报告/基准
 
-# M1：读会话日志 → 统一事件流（合成语料在 data/bench，可直接拿来跑）
+# M1-M2：读会话日志 → 统一事件流 + episode 切分（合成语料在 data/bench，可直接跑）
 s2r scan data/bench/claude --out events.json
+#   → events.json 里含 events[] 与 episodes[]（分数拆分 / 状态 / 证据锚点 / 丢弃原因）
+s2r scan ~/.claude/projects --out real.json     # 真实日志只读（整目录扫描按件隔离）
 
-# M1：合成基准对账（真值逐字段比对；退出码即结论）
+# 合成基准对账（真值逐字段比对，含 episode 层；退出码即结论）
 s2r bench
-s2r bench --probe drop-exit-code    # 探活：注入缺陷，基准必须报未达标
-python tools/gen_bench.py --check   # 语料再生成位级一致（冻结物未被手改）
+s2r bench --probe drop-episode       # 探活：注入缺陷，基准必须报未达标
+python tools/gen_bench.py --check    # 语料再生成位级一致（冻结物未被手改）
 ```
 
 `s2r scan` 读真实的 `~/.claude/projects/**/*.jsonl` 与 `~/.codex/sessions/**/*.jsonl`，也用

@@ -20,7 +20,11 @@
       "demo-user, bug: rounding is applied twice in /demo/alpha/src/calc.py"
     ]
   },
+  "expect_episode_statuses": [
+    "ended_without_pass"
+  ],
   "expect_episodes": 1,
+  "expect_filter_reasons": [],
   "input_file": "claude/ambiguous-old-string-1.jsonl",
   "sample": "ambiguous-old-string-1",
   "session_id": "sess-demo-0006"

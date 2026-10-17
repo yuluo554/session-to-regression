@@ -112,7 +112,9 @@ def test_manifest_declares_coverage_thresholds_and_pending_facts(tmp_path, repo_
     for episode_type, minimum in manifest["coverage"]["min_count_by_type"].items():
         observed = manifest["coverage"]["observed_count_by_type"].get(episode_type, 0)
         assert observed >= minimum, "{}: 生成量 {} < 门槛 {}".format(episode_type, observed, minimum)
-    assert "episodes" in manifest["pending_facts"], "M2 才对账的字段必须显式声明为 pending，不得静默跳过"
+    assert "before_after" in manifest["pending_facts"], "尚未对账的面必须显式声明为 pending，不得静默跳过"
+    assert "episodes" not in manifest["pending_facts"], "M2 起 episode 已真对账，不该再挂在 pending 里"
+    assert "episode_count" in manifest["checked_facts"], "episode 事实必须进对账面"
     assert manifest["thresholds"]["max_false_positive"] == 0
 
 
@@ -140,7 +142,7 @@ def test_refusing_to_overwrite_frozen_corpus_without_force(tmp_path, repo_root):
 
 
 def test_bench_reports_ok_on_frozen_corpus(repo_root):
-    report = bench.run(repo_root / "data" / "bench", limits(repo_root))
+    report = bench.run(repo_root / "data" / "bench", limits(repo_root), cfg(repo_root))
     assert report["status"] == "ok"
     gates = report["gates"]
     assert gates["detection"]["matched"] == gates["detection"]["checked"] > 0
@@ -149,18 +151,17 @@ def test_bench_reports_ok_on_frozen_corpus(repo_root):
     assert gates["ledger"]["ok"] and gates["coverage"]["ok"] and gates["files_present"]["ok"]
     assert report["pending_facts"], "pending 字段必须在报告里可见（不静默当通过）"
 
-
 @pytest.mark.parametrize("probe", bench.PROBES)
 def test_probes_are_detected(probe, repo_root):
     """探活：注入已知缺陷 → 必须报未达标。四个探活里任何一个变成"没检出"就是基准失灵。"""
-    report = bench.run(repo_root / "data" / "bench", limits(repo_root), probe=probe)
+    report = bench.run(repo_root / "data" / "bench", limits(repo_root), cfg(repo_root), probe=probe)
     assert report["probe_detected"] is True
     assert report["status"] == "probe_detected"
 
 
 def test_unknown_probe_name_is_an_input_error(repo_root):
     with pytest.raises(InputUnavailable):
-        bench.run(repo_root / "data" / "bench", limits(repo_root), probe="no-such-probe")
+        bench.run(repo_root / "data" / "bench", limits(repo_root), cfg(repo_root), probe="no-such-probe")
 
 
 def test_tampered_corpus_is_caught_by_the_ledger_gate(tmp_path, repo_root):
@@ -169,7 +170,7 @@ def test_tampered_corpus_is_caught_by_the_ledger_gate(tmp_path, repo_root):
     shutil.copytree(str(repo_root / "data" / "bench"), str(copy))
     target = sorted((copy / "claude").glob("*.jsonl"))[0]
     target.write_bytes(target.read_bytes().replace(b"demo", b"DEMO"))
-    report = bench.run(copy, limits(repo_root))
+    report = bench.run(copy, limits(repo_root), cfg(repo_root))
     assert report["status"] != "ok"
     assert report["gates"]["ledger"]["ok"] is False
     assert report["gates"]["ledger"]["mismatches"]
@@ -179,23 +180,47 @@ def test_missing_sample_file_is_caught(tmp_path, repo_root):
     copy = tmp_path / "bench"
     shutil.copytree(str(repo_root / "data" / "bench"), str(copy))
     sorted((copy / "codex").glob("*.jsonl"))[0].unlink()
-    report = bench.run(copy, limits(repo_root))
+    report = bench.run(copy, limits(repo_root), cfg(repo_root))
     assert report["status"] != "ok"
     assert report["gates"]["files_present"]["ok"] is False
 
 
 def test_only_filter_restricts_the_checked_set(repo_root):
-    report = bench.run(repo_root / "data" / "bench", limits(repo_root), only=["happy_path"])
+    report = bench.run(repo_root / "data" / "bench", limits(repo_root), cfg(repo_root), only=["happy_path"])
     assert report["gates"]["detection"]["checked"] == 1
     assert report["status"] == "ok"
 
 
 def test_missing_manifest_is_an_input_error(tmp_path, repo_root):
     with pytest.raises(InputUnavailable) as excinfo:
-        bench.run(tmp_path, limits(repo_root))
+        bench.run(tmp_path, limits(repo_root), cfg(repo_root))
     assert "manifest" in str(excinfo.value)
 
 
 def test_summary_lines_expose_failures_and_pending(repo_root):
-    lines = bench.summary_lines(bench.run(repo_root / "data" / "bench", limits(repo_root), only=["unsupported_format"]))
+    """摘要必须把"未对账的面"（M3–M5）与失败样本都摆出来，不许只有一句 ok。"""
+    lines = bench.summary_lines(bench.run(repo_root / "data" / "bench", limits(repo_root), cfg(repo_root), only=["unsupported_format"]))
     assert any("pending" in line for line in lines)
+    assert any("before_after" in line for line in lines), "M3 尚未对账的面必须出现在摘要里"
+
+
+def test_episode_mismatch_is_attributed_to_the_sample(tmp_path, repo_root):
+    """逐样本点名必须指到**具体字段**，而且要确认这条判据真的在跑。
+
+    反面教材（首版）：只断言"摘要里出现样本名"——台账门也会打一行含样本名的失败，
+    于是断言被**另一条判据**满足，把"episode 对账"整段删掉后测试照样绿（张冠李戴）。
+    正解 = 断言只锚 episode 判据：样本条目的 mismatches 里必须出现 `episode_count`。
+    """
+    copy = tmp_path / "bench"
+    shutil.copytree(str(repo_root / "data" / "bench"), str(copy))
+    truth = copy / "truth" / "happy-path-1.truth.json"
+    truth.write_bytes(truth.read_bytes().replace(b'"expect_episodes": 1', b'"expect_episodes": 3'))
+
+    report = bench.run(copy, limits(repo_root), cfg(repo_root), only=["happy_path"])
+    entry = [item for item in report["samples"] if item["sample"] == "happy-path-1"][0]
+    assert entry["status"] == "fail", entry
+    assert any("episode_count" in item for item in entry["mismatches"]), entry["mismatches"]
+    assert report["status"] != "ok"
+
+    lines = bench.summary_lines(report)
+    assert any(("happy-path-1" in line) and ("episode_count" in line) for line in lines), lines

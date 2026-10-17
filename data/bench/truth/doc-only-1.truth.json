@@ -20,7 +20,11 @@
       "demo-user, bug: the README instructions are outdated in /demo/alpha/src/calc.py"
     ]
   },
+  "expect_episode_statuses": [],
   "expect_episodes": 0,
+  "expect_filter_reasons": [
+    "docs_only"
+  ],
   "input_file": "claude/doc-only-1.jsonl",
   "sample": "doc-only-1",
   "session_id": "sess-demo-0005"

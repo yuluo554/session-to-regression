@@ -25,7 +25,11 @@
       "demo-user, bug: format_amount() drops the sign in /demo/alpha/src/calc.py"
     ]
   },
+  "expect_episode_statuses": [
+    "verified_by_run"
+  ],
   "expect_episodes": 1,
+  "expect_filter_reasons": [],
   "input_file": "codex/happy-path-1.jsonl",
   "sample": "happy-path-1",
   "session_id": "sess-demo-0001"

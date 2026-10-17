@@ -19,13 +19,13 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
-from . import benchdata, events, readers, serialize
+from . import benchdata, episode as episode_mod, events, readers, serialize
 from .errors import InputUnavailable, UnsupportedFormat
 
 MANIFEST_NAME = benchdata.MANIFEST_NAME
 
 #: 探活名：向"读到的实际事实"注入缺陷，基准必须检出
-PROBES = ("drop-tool", "zero-events", "drop-exit-code", "accept-unknown")
+PROBES = ("drop-tool", "zero-events", "drop-exit-code", "accept-unknown", "drop-episode", "keep-filtered")
 
 #: 对账的字段集（与 manifest 的 checked_facts 对应；episodes 属 M2，见 pending_facts）
 CHECKED_FACTS = (
@@ -37,6 +37,11 @@ CHECKED_FACTS = (
     "files_touched",
     "exit_codes",
     "user_report_fragments",
+    # M2 起：episode 层事实也进对账面（真值里的 expect_episodes / expect_episode_statuses /
+    # expect_filter_reasons 由生成器在**构造侧**声明）
+    "episode_count",
+    "episode_statuses",
+    "filter_reasons",
 )
 
 
@@ -59,7 +64,7 @@ def load_manifest(data_dir: Path) -> Mapping[str, Any]:
     return manifest
 
 
-def _facts(file_read: readers.FileRead, expected: Mapping[str, Any]) -> Dict[str, Any]:
+def _facts(file_read: readers.FileRead, expected: Mapping[str, Any], cfg: Mapping[str, Any]) -> Dict[str, Any]:
     """从读取结果里算出**可对账的事实**（只算，不判定）。"""
     kinds: Counter = Counter(event.kind for event in file_read.events)
     tools: List[str] = []
@@ -81,6 +86,8 @@ def _facts(file_read: readers.FileRead, expected: Mapping[str, Any]) -> Dict[str
                 user_texts.append(text)
     declared_fragments = expected.get("user_report_fragments") or []
     matched_fragments = [fragment for fragment in declared_fragments if any(fragment in text for text in user_texts)]
+    session_files = {event.session_id: str(file_read.path) for event in file_read.events}
+    split = episode_mod.split(file_read.events, cfg, session_files=session_files)
     return {
         "source": file_read.source,
         "format_version": file_read.format_version,
@@ -90,6 +97,9 @@ def _facts(file_read: readers.FileRead, expected: Mapping[str, Any]) -> Dict[str
         "files_touched": files,
         "exit_codes": exit_codes,
         "user_report_fragments": matched_fragments,
+        "episode_count": len(split.episodes),
+        "episode_statuses": [item.status for item in split.episodes],
+        "filter_reasons": sorted(str(item["reason"]) for item in split.filtered),
     }
 
 
@@ -114,12 +124,22 @@ def _apply_probe(probe: Optional[str], actual: Dict[str, Any]) -> Dict[str, Any]
         actual["kind_counts"] = {}
     elif probe == "drop-exit-code":
         actual["exit_codes"] = []
+    elif probe == "drop-episode":
+        # 模拟"切分器漏切一条修复链"
+        if actual["episode_statuses"]:
+            actual["episode_statuses"] = actual["episode_statuses"][:-1]
+            actual["episode_count"] = len(actual["episode_statuses"])
+    elif probe == "keep-filtered":
+        # 模拟"该被过滤的候选没被过滤掉"
+        if actual["filter_reasons"]:
+            actual["filter_reasons"] = actual["filter_reasons"][:-1]
     return actual
 
 
 def run(
     data_dir: Path,
     limits: Mapping[str, Any],
+    cfg: Mapping[str, Any],
     only: Optional[Sequence[str]] = None,
     probe: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -154,7 +174,7 @@ def run(
             ledger_mismatches.append("{}: 真值 sha256 与台账不符".format(sample["truth"]))
         if only and sample["sample"] not in only and sample["episode_type"] not in only:
             continue
-        _check_sample(data_dir, sample, limits, probe, sample_reports, false_positives)
+        _check_sample(data_dir, sample, limits, cfg, probe, sample_reports, false_positives)
         checked += 1
         if sample_reports[-1]["status"] in ("pass", "error_ok"):
             matched += 1
@@ -202,6 +222,7 @@ def _check_sample(
     data_dir: Path,
     sample: Mapping[str, Any],
     limits: Mapping[str, Any],
+    cfg: Mapping[str, Any],
     probe: Optional[str],
     sample_reports: List[Dict[str, Any]],
     false_positives: List[str],
@@ -213,6 +234,12 @@ def _check_sample(
     truth_path = data_dir / sample["truth"]
     truth = json.loads(truth_path.read_bytes().decode("utf-8"))
     expected = truth.get("expect") or {}
+    # 真值里的 episode 层期望（顶层键）映射到事实名；None 表示该样本不涉 episode 对账
+    if truth.get("expect_episodes") is not None:
+        expected = dict(expected)
+        expected["episode_count"] = truth["expect_episodes"]
+        expected["episode_statuses"] = list(truth.get("expect_episode_statuses") or [])
+        expected["filter_reasons"] = sorted(str(item) for item in (truth.get("expect_filter_reasons") or []))
     expect_error = truth.get("expect_error")
 
     if expect_error:
@@ -250,7 +277,7 @@ def _check_sample(
         sample_reports.append({"sample": name, "episode_type": episode_type, "status": "fail", "mismatches": ["读取失败: {}: {}".format(type(exc).__name__, exc)]})
         return
 
-    actual = _apply_probe(probe, _facts(file_read, expected))
+    actual = _apply_probe(probe, _facts(file_read, expected, cfg))
     mismatches = compare(expected, actual)
     sample_reports.append({"sample": name, "episode_type": episode_type, "status": "pass" if not mismatches else "fail", "mismatches": mismatches})
 

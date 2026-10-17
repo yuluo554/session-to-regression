@@ -32,6 +32,49 @@ WRITE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 
 TEXT_BLOCK_KINDS = {"text", "thinking"}
 
+#: 承载事件的顶层行类型（只有这两种进事件流）
+CONVERSATION_LINE_TYPES = ("user", "assistant")
+
+#: 实测的非会话状态行类型（`data/README.md` §六.1 全量枚举）——
+#: 一个文件里**全部**行都是这些类型且没有任何 `message` 时，它是 harness 状态文件而不是会话日志。
+STATE_LINE_TYPES = frozenset(
+    {
+        "last-prompt",
+        "ai-title",
+        "mode",
+        "permission-mode",
+        "queue-operation",
+        "file-history-snapshot",
+        "file-history-delta",
+        "atis-latch",
+        "started",
+        "result",
+        "cost-state",
+        "system",
+        "attachment",
+    }
+)
+
+
+def is_state_only(records: Sequence[Mapping[str, Any]]) -> bool:
+    """探测窗口内是否"全是状态行"（没有任何会话事件行）→ 这不是会话日志。
+
+    判据 = ① 窗口内没有任何记录带 `message`；② 出现过的顶层 `type` 全在实测状态类型集合内。
+    两条都不满足时**不**下这个结论——那样会退化成"我不认识就说是状态文件"，
+    真正的格式漂移必须继续走 `unsupported_format`（严格报错）。
+    """
+    if not records:
+        return False
+    observed = set()
+    for record in records:
+        if "message" in record:
+            return False
+        kind = record.get("type")
+        if not isinstance(kind, str):
+            return False
+        observed.add(kind)
+    return bool(observed) and observed <= STATE_LINE_TYPES
+
 
 def emit(record: Mapping[str, Any], lineno: int, offset: int, path: Path, state: Any, max_result_chars: int) -> Iterator[events.Event]:
     line_type = record.get("type")
@@ -159,8 +202,11 @@ def _tool_result(
         "text": text,
         "truncated": truncated,
         "file_path": file_path if isinstance(file_path, str) and file_path else events.UNKNOWN,
-        # 判据按"键存在"（E1/K14），不是 type 字段值
+        # 判据按"键存在"（E1/K14），不是 type 字段值；但"存在"还不够——
+        # 实测：新建文件的结果也带 `structuredPatch: []`（空表，82 条），空表**不含 diff**，
+        # 所以另给一个"有 hunk"的标记，下游用哪个必须自己说清楚。
         "has_structured_patch": has_patch,
+        "has_patch_hunks": bool(hunks),
         "structured_patch_hunks": len(hunks) if isinstance(hunks, list) else 0,
         "has_original_file": "originalFile" in result_meta,
         "result_type": result_meta.get("type") if isinstance(result_meta.get("type"), str) else events.UNKNOWN,

@@ -137,19 +137,43 @@ def cmd_scan(args: argparse.Namespace) -> int:
     """
     config = config_mod.load_config(args.config)
     limits = readers.limits_from_config(config)
-    result = readers.scan(args.inputs, limits, roots=[args.claude_root, args.codex_root])
+    result = readers.scan(args.inputs, limits, roots=[args.claude_root, args.codex_root], cfg=config)
     text = readers.dump(result)
     event_count = len(result.events)
     if args.out:
         serialize.write_text_atomic(args.out, text)
         sys.stdout.write(
-            "scan: {} 个文件，{} 个会话，{} 条事件 → {}\n".format(
-                len(result.files), len(result.to_dict()["sessions"]), event_count, args.out
+            "scan: 读入 {} 个文件（跳过 {}，失败 {}），{} 个会话，{} 条事件，{} 个 episode（丢弃 {}）→ {}\n".format(
+                len(result.files), len(result.skipped), len(result.failed),
+                len(result.to_dict()["sessions"]), event_count,
+                len(result.episodes), len(result.filtered), args.out,
             )
         )
     else:
         sys.stdout.write(text)
+    # 退出码语义（批量失败隔离）：
+    #   0 = 至少读入一个文件（逐件跳过/失败已在 skipped/failed 里可见，不改变退出码）；
+    #   1 = 读入了文件但**零事件**（显式降级，不伪装成功）；
+    #   2 = **一个文件都没读进来**（全非日志或全读不了 → 输入不可用）。
+    if not result.files:
+        raise InputUnavailable(
+            "没有任何可用输入：跳过 {} 个（非会话日志），失败 {} 个".format(len(result.skipped), len(result.failed)),
+            hint="明细: {}；单文件输入时该文件本身必须是会话日志".format(_scan_problem_detail(result)),
+        )
     return EXIT_OK if event_count else EXIT_CHECK_FAILED
+
+
+def _scan_problem_detail(result) -> str:
+    """把逐件问题拼成一行（最多三条），让"全读不了"这种错误直接指出原因。"""
+    items = []
+    for entry in list(result.failed) + list(result.skipped):
+        items.append("{}: {} ({})".format(entry["path"], entry.get("code", "?"), entry.get("reason", "")[:60]))
+    if not items:
+        return "输入为空"
+    shown = items[:3]
+    if len(items) > len(shown):
+        shown.append("… 另有 {} 件".format(len(items) - len(shown)))
+    return " | ".join(shown)
 
 
 def cmd_bench(args: argparse.Namespace) -> int:
@@ -176,7 +200,7 @@ def cmd_bench(args: argparse.Namespace) -> int:
         sys.stdout.write("基准再生成位级一致（{} 个样本，rng_draws={}）\n".format(stats["samples"], stats["draws"]))
         return EXIT_OK
 
-    report = bench_mod.run(data_dir, limits, only=args.only, probe=args.probe)
+    report = bench_mod.run(data_dir, limits, config, only=args.only, probe=args.probe)
     for line in bench_mod.summary_lines(report):
         sys.stdout.write(line + "\n")
     if args.out:

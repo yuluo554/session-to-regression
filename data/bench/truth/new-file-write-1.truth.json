@@ -1,25 +1,30 @@
 {
   "episode_type": "new_file_write",
   "expect": {
-    "event_count": 3,
+    "event_count": 5,
     "exit_codes": [],
     "files_touched": [
       "/demo/alpha/src/helper.py"
     ],
     "kind_counts": {
-      "tool_call": 1,
-      "tool_result": 1,
+      "tool_call": 2,
+      "tool_result": 2,
       "user_msg": 1
     },
     "source": "claude",
     "tools_used": [
+      "Bash",
       "Write"
     ],
     "user_report_fragments": [
       "demo-user, bug: need a helper for formatting in /demo/alpha/src/calc.py"
     ]
   },
-  "expect_episodes": 0,
+  "expect_episode_statuses": [
+    "ended_without_pass"
+  ],
+  "expect_episodes": 1,
+  "expect_filter_reasons": [],
   "input_file": "claude/new-file-write-1.jsonl",
   "sample": "new-file-write-1",
   "session_id": "sess-demo-0007"

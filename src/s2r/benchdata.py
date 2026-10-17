@@ -356,7 +356,7 @@ def sample_happy_path(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) 
         builder.codex_file_change({BETA_FORMAT: {"type": "update", "unified_diff": "@@ -1 +1 @@\n-    return value\n+    return abs(value)\n"}})
         builder.codex_command("python -m pytest tests/test_format.py -q", "call-happy-run2")
         builder.codex_command_output("call-happy-run2", builder.passing_output(0), 0)
-    return builder, {"type": "happy_path", "expect_episodes": 1}
+    return builder, {"type": "happy_path", "expect_episodes": 1, "expect_episode_statuses": ["verified_by_run"], "expect_filter_reasons": []}
 
 
 def sample_ended_without_pass(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) -> Tuple[Builder, Dict[str, Any]]:
@@ -370,7 +370,7 @@ def sample_ended_without_pass(rng: Splitmix64, cfg: Mapping[str, Any], session_i
     patch = "*** Begin Patch\n*** Update File: {}\n@@\n-    return items[0]\n+    return items[0] if items else None\n*** End Patch".format(ALPHA_CALC)
     builder.codex_apply_patch("call-eop-patch", patch, [ALPHA_CALC], "")
     builder.codex_patch_output("call-eop-patch", "Exit code: 0\nWall time: 0 seconds\nOutput:\nSuccess. Updated the following files:\nM {}\n".format(ALPHA_CALC))
-    return builder, {"type": "ended_without_pass", "expect_episodes": 1}
+    return builder, {"type": "ended_without_pass", "expect_episodes": 1, "expect_episode_statuses": ["ended_without_pass"], "expect_filter_reasons": []}
 
 
 def sample_multi_bug(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) -> Tuple[Builder, Dict[str, Any]]:
@@ -388,7 +388,7 @@ def sample_multi_bug(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) -
     builder.claude_tool_result("toolu-multi-edit2", "The file has been updated.", {"filePath": BETA_FORMAT, "originalFile": "def slugify(name):\n    return name\n", "structuredPatch": []})
     builder.claude_tool_call("Bash", {"command": "python -m pytest tests/test_slug.py -q"}, tool_use_id="toolu-multi-run3")
     builder.claude_tool_result("toolu-multi-run3", builder.passing_output(0))
-    return builder, {"type": "multi_bug", "expect_episodes": 2}
+    return builder, {"type": "multi_bug", "expect_episodes": 2, "expect_episode_statuses": ["ended_without_pass", "verified_by_run"], "expect_filter_reasons": []}
 
 
 def sample_no_failure_signal(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) -> Tuple[Builder, Dict[str, Any]]:
@@ -398,7 +398,7 @@ def sample_no_failure_signal(rng: Splitmix64, cfg: Mapping[str, Any], session_id
     builder.claude_assistant_message("Let me look at the exporter first.")
     builder.claude_tool_call("Read", {"file_path": BETA_FORMAT}, path=BETA_FORMAT, tool_use_id="toolu-nofail-read")
     builder.claude_tool_result("toolu-nofail-read", "def format_amount(value):\n    return value\n")
-    return builder, {"type": "no_failure_signal", "expect_episodes": 0}
+    return builder, {"type": "no_failure_signal", "expect_episodes": 0, "expect_episode_statuses": [], "expect_filter_reasons": ["no_failure_evidence"]}
 
 
 def sample_doc_only(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) -> Tuple[Builder, Dict[str, Any]]:
@@ -409,7 +409,7 @@ def sample_doc_only(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) ->
     builder.claude_tool_result("toolu-doc-run", builder.failure_output(1))
     builder.claude_tool_call("Edit", {"file_path": DOC_TARGET, "old_string": "run it", "new_string": "run it with --demo", "replace_all": False}, path=DOC_TARGET, tool_use_id="toolu-doc-edit")
     builder.claude_tool_result("toolu-doc-edit", "The file has been updated.", {"filePath": DOC_TARGET, "originalFile": "run it\n", "structuredPatch": []})
-    return builder, {"type": "doc_only", "expect_episodes": 0}
+    return builder, {"type": "doc_only", "expect_episodes": 0, "expect_episode_statuses": [], "expect_filter_reasons": ["docs_only"]}
 
 
 def sample_ambiguous_old_string(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) -> Tuple[Builder, Dict[str, Any]]:
@@ -428,17 +428,37 @@ def sample_ambiguous_old_string(rng: Splitmix64, cfg: Mapping[str, Any], session
             "structuredPatch": [{"oldStart": 2, "oldLines": 1, "newStart": 2, "newLines": 1, "lines": ["-    return value", "+    return round(value, 2)"]}],
         },
     )
-    return builder, {"type": "ambiguous_old_string", "expect_episodes": 1}
+    return builder, {"type": "ambiguous_old_string", "expect_episodes": 1, "expect_episode_statuses": ["ended_without_pass"], "expect_filter_reasons": []}
 
 
 def sample_new_file_write(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) -> Tuple[Builder, Dict[str, Any]]:
-    """纯新建文件：没有 before 镜像（不得进入生成路径）。"""
+    """纯新建文件：有失败链与代码改动，但**没有 before 镜像**。
+
+    这是一条**应被保留**的 episode（分数够），题目在 M3：还原器必须如实记
+    `no_before_image`，而不是硬造一个 before。首版样本没有失败信号，于是它只验证了
+    "无失败证据即丢弃"，压根没走到"无 before 镜像"这条路径（M2 复核时补上）。
+    """
     builder = Builder("claude", session_id, cfg, rng)
     builder.claude_user_message(builder.bug_report("need a helper for formatting"))
-    builder.claude_tool_call("Write", {"file_path": NEW_FILE, "content": "def helper(value):\n    return value\n"}, path=NEW_FILE, tool_use_id="toolu-new-write")
-    builder.claude_tool_result("toolu-new-write", "File created successfully.", {"type": "create", "filePath": NEW_FILE, "structuredPatch": []})
-    return builder, {"type": "new_file_write", "expect_episodes": 0}
-
+    builder.claude_tool_call("Bash", {"command": "python -m pytest tests/test_format.py -q"}, tool_use_id="toolu-new-run")
+    builder.claude_tool_result("toolu-new-run", builder.failure_output(1, "ImportError: cannot import name helper"))
+    builder.claude_tool_call(
+        "Write",
+        {"file_path": NEW_FILE, "content": "def helper(value):" + chr(10) + "    return value" + chr(10)},
+        path=NEW_FILE,
+        tool_use_id="toolu-new-write",
+    )
+    builder.claude_tool_result(
+        "toolu-new-write",
+        "File created successfully.",
+        {"type": "create", "filePath": NEW_FILE, "structuredPatch": []},
+    )
+    return builder, {
+        "type": "new_file_write",
+        "expect_episodes": 1,
+        "expect_episode_statuses": ["ended_without_pass"],
+        "expect_filter_reasons": [],
+    }
 
 def sample_unsupported_format(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) -> Tuple[Builder, Dict[str, Any]]:
     """未知格式：读取器必须显式报 unsupported_format（不得静默产出空事件流）。"""
@@ -553,7 +573,10 @@ def write_corpus(out_dir: Path, cfg: Mapping[str, Any], force: bool = False) -> 
             "session_id": session_id,
             "input_file": relative,
             "expect": dict(builder.expect),
+            # M2：episode 层期望（构造侧声明，不由被测实现反推）
             "expect_episodes": meta["expect_episodes"],
+            "expect_episode_statuses": meta.get("expect_episode_statuses", []),
+            "expect_filter_reasons": meta.get("expect_filter_reasons", []),
         }
         if "expect_error" in meta:
             truth["expect_error"] = meta["expect_error"]
@@ -600,8 +623,15 @@ def write_corpus(out_dir: Path, cfg: Mapping[str, Any], force: bool = False) -> 
             "files_touched",
             "exit_codes",
             "user_report_fragments",
+            "filter_reasons",
+            "episode_statuses",
+            "episode_count",
         ],
-        "pending_facts": {"episodes": "M2：episode 切分落地后由 bench 对账（当前记 pending_m2，不静默当通过）"},
+        "pending_facts": {
+            "before_after": "M3：before/after 还原落地后由 bench 逐字符对账",
+            "generated_tests": "M4：pytest 骨架生成落地后由 bench 对账生成内容",
+            "red_green": "M5：RED/GREEN 双验证落地后由 bench 对账退出码",
+        },
         "privacy": {
             "whitelist": {key: list(value) if isinstance(value, tuple) else value for key, value in WHITELIST.items()},
             "note": "全部为假值；假绝对路径只保留通用盘符形态，后缀段为假项目名",

@@ -60,7 +60,7 @@
 | 承诺项 | 素材来源 | 交付物内可达性 | 核验方式 | 状态 |
 |---|---|---|---|---|
 | M1 双 harness 读取器（Claude jsonl + Codex rollout → 统一事件流） | `~/.claude/projects/**/*.jsonl` ✅；`~/.codex/sessions/**/*.jsonl` ✅ 220 文件 | 随包，零网络；路径可覆盖（含环境变量） | 合成语料逐字段对账（8/8）+ 同日志双跑逐字节一致 + 未知格式/版本指纹显式报错 | ✅ M1 |
-| M2 episode 切分器（确定性规则 + 打分） | 事件流 + 语义词表（配置一处定义） | 随包 | 合成会话植入真值：应切/不应切逐例对账；多 bug、未修复、先成后败边界例 | ⬜ 下一棒（HANDOFF-M2） |
+| M2 episode 切分器（确定性规则 + 打分） | 事件流 + 语义词表（配置一处定义） | 随包 | 合成语料逐例对账（多 bug / 未修复 / 先成后败 / 仅提问 / 只改文档 / 无 before）；权重与阈值只读配置 | ✅ M2 |
 | M3 差分还原器（logs-only，不依赖 git） | `structuredPatch`+`originalFile` ✅ 抽样 4/4；Edit `old_string` ✅ 252/252；Codex `apply_patch` ✅ 104 次 | 随包；磁盘文件可选 | 合成基准 before/after 逐字符对账；真实样本人工抽验 | ⬜ 待 M3 |
 | M4 pytest 骨架生成器（模板 + AST，零模型） | M3 输出 + 仓库测试约定探测 | 随包；生成物落用户仓库 `tests/regression/` | 合成基准生成内容对账；同 episode 逐字节稳定；约定探测失败走保守默认并标注 | ⬜ 待 M4 |
 | M5 RED 验证器 + `manifest.json` | 隔离临时副本 + pytest | 随包；pytest 为运行期可选依赖（缺失 exit 3） | before 必失败 / after 必通过双跑；未通过项不进正式目录；退出码四语义测试 | ⬜ 待 M5 |
@@ -123,16 +123,16 @@
 
 ## 七、下一步（交接语）
 
-**M0（计划先行 + 骨架）与 M1（数据先行 + 双 harness 读取器 + 合成基准）已于 2026-10-17 完成**：
+**M0（骨架）· M1（数据先行 + 读取器 + 合成基准）· M2（episode 切分）已于 2026-10-17 完成**：
 计划文档 00–07 定稿、骨架落地、字段核对与三处勘误入台账、`scan`/`bench` 两条命令跑通、
 门禁与本地等价校验逐条留档（见 [verify/README.md](verify/README.md)）。
-下一棒入口 = [plan/HANDOFF-M2.md](HANDOFF-M2.md)（六节：进度+证据 / 待办 / K 口径 / 环境坑 / DoD / 命令速查）。
+下一棒入口 = [plan/HANDOFF-M3.md](HANDOFF-M3.md)（六节：进度+证据 / 待办 / K 口径 / 环境坑 / DoD / 命令速查）。
 
 新对话第一条命令（绝对路径只出现在用户侧启动命令里）：
 
-    /goal 读取 "<项目绝对路径>/plan/HANDOFF-M2.md" 继续完成任务
+    /goal 读取 "<项目绝对路径>/plan/HANDOFF-M3.md" 继续完成任务
 
-M2 要做的事（详见 HANDOFF-M2 与 [06-里程碑.md](06-里程碑.md)）：
+M3 要做的事（详见 HANDOFF-M3 与 [06-里程碑.md](06-里程碑.md)）：
 
 1. 逐样本核对三个 ⬜ 字段（Codex `apply_patch` 载荷内文件路径字段、Claude `MultiEdit` 字段形态、Codex `exec` 失败判定字段语义），结论写入 [data/README.md](../data/README.md)，**未核对字段不得进入判定路径**（K4）；
 2. 实现读取器（按首行形态分流 → 归一事件流 IR）与日志根自适应发现，`s2r scan` 落地并**退役 exit 4**；

@@ -41,6 +41,7 @@ SCHEMA: Sequence[Tuple[str, type]] = (
     ("episode.max_line_bytes", int),
     ("episode.max_result_chars", int),
     ("episode.version_probe_lines", int),
+    ("episode.doc_suffixes", list),
     ("verify.timeout_seconds", int),
     ("verify.tmpdir_prefix", str),
     ("verify.pytest_command", list),
@@ -52,6 +53,8 @@ SCHEMA: Sequence[Tuple[str, type]] = (
     ("generate.arrange_placeholder", str),
     ("generate.assert_placeholder", str),
     ("vocabulary.bug_terms", list),
+    ("vocabulary.test_command_markers", list),
+    ("vocabulary.test_pass_markers", list),
     ("vocabulary.failure_signals", list),
 )
 
@@ -74,7 +77,14 @@ NON_NEGATIVE_KEYS = (
 )
 
 #: 必须为非空字符串列表的键
-NON_EMPTY_STR_LIST_KEYS = ("verify.pytest_command", "vocabulary.bug_terms", "vocabulary.failure_signals")
+NON_EMPTY_STR_LIST_KEYS = (
+    "verify.pytest_command",
+    "vocabulary.bug_terms",
+    "vocabulary.failure_signals",
+    "vocabulary.test_command_markers",
+    "vocabulary.test_pass_markers",
+    "episode.doc_suffixes",
+)
 
 
 def package_config_path() -> Path:

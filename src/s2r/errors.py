@@ -106,6 +106,27 @@ class StageNotReady(S2RError):
         self.milestone = milestone
 
 
+class NotASessionLog(S2RError):
+    """文件根本不是会话日志（如 harness 状态文件）。
+
+    实测：`~/.claude/projects/**/*.jsonl` 里混着大量非会话文件（本机 125 个文件里 122 个是会话日志、3 个是子代理索引一类的东西）。批量扫描时这类文件按件隔离并**显式列出**（不是「格式不支持」，也不是静默跳过）；单文件指向它时是一种用法错误（退出码 2）。批量扫描时这类文件按件隔离并**显式列出**（不是"格式不支持"，
+    也不是静默跳过）；单文件指向它时是一种用法错误（退出码 2）。
+    """
+
+    code = "not_a_session_log"
+    exit_code = EXIT_USAGE
+
+    def __init__(self, message: str, observed_types: Tuple[str, ...] = (), hint: Optional[str] = None) -> None:
+        super().__init__(message, hint=hint)
+        self.observed_types = tuple(observed_types)
+
+    def lines(self) -> List[str]:
+        out = super().lines()
+        if self.observed_types:
+            out.append("observed_line_types: {}".format(", ".join(self.observed_types)))
+        return out
+
+
 class CheckFailed(S2RError):
     """自检/基准未达标。"""
 

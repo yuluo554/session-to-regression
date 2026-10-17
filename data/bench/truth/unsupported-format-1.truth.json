@@ -9,8 +9,10 @@
     "tools_used": [],
     "user_report_fragments": []
   },
+  "expect_episode_statuses": [],
   "expect_episodes": null,
   "expect_error": "unsupported_format",
+  "expect_filter_reasons": [],
   "input_file": "invalid/unsupported-format-1.jsonl",
   "sample": "unsupported-format-1",
   "session_id": "sess-demo-0008"
