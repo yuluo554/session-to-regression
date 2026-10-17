@@ -65,6 +65,15 @@
       "status": "ok"
     }
   ],
+  "expect_red_green": [
+    {
+      "episode_id": "sess-demo-0002#6",
+      "green_exit": 0,
+      "reason": "",
+      "red_exit": 1,
+      "status": "verified"
+    }
+  ],
   "input_file": "codex/ended-without-pass-1.jsonl",
   "sample": "ended-without-pass-1",
   "session_id": "sess-demo-0002"

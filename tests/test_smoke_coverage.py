@@ -33,27 +33,25 @@ def test_every_subcommand_has_a_real_invocation_in_the_smoke_table():
     assert set(SMOKE.INVOCATIONS) == set(cli.registered_commands()) - {"selftest", "config"}
     for command, args in sorted(SMOKE.INVOCATIONS.items()):
         for form in (SMOKE.BARE, SMOKE.MODULE):
-            argv = list(SMOKE._staged_argv(command, form))
+            argv = list(SMOKE.argv_for(command, form))
             assert command in argv, argv
             assert "--config" not in argv  # 默认定位口径文件（显式传会掩盖定位缺陷）
 
 
-def test_expectations_follow_the_stage_table_exactly():
-    """期望退出码与「阶段未就绪」表严格对应：已交付命令必须在 DELIVERED_EXPECT 里显式登记。
+def test_every_delivered_command_registers_its_real_exit_code():
+    """期望退出码必须逐条显式登记：新增命令却不登记 → `expected_exit` 当场 KeyError（测试同步红）。
 
-    这条断言就是"退役待办"的机器提醒——把命令从 STAGED_COMMANDS 摘除却不登记真实期望时，
-    `expected_exit` 当场 KeyError，测试同步变红（不会把 4 静默当成契约）。
+    这条断言就是"退役待办"的机器提醒；M5 之后五条业务命令全部交付，表里不该再有"未交付"这种状态。
     """
-    rows = SMOKE.build_smoke()
-    staged_rows = [row for row in rows if row.covers in cli.STAGED_COMMANDS]
-    assert staged_rows, "没有覆盖到任何未交付命令"
-    assert {row.expect_exit for row in staged_rows} == {errors.EXIT_STAGE_NOT_READY}
-
-    delivered = set(cli.registered_commands()) - set(cli.STAGED_COMMANDS) - {"selftest", "config"}
+    delivered = set(cli.registered_commands()) - {"selftest", "config"}
     assert delivered, "已交付命令集合为空（扫描面异常）"
     assert set(SMOKE.DELIVERED_EXPECT) == delivered, "已交付命令必须逐个登记真实期望退出码"
     for command in sorted(delivered):
         assert SMOKE.expected_exit(command) == SMOKE.DELIVERED_EXPECT[command]
+        assert SMOKE.expected_exit(command) in errors.EXIT_CODES
+    # 退出码 4 已整项退役：冒烟表里不许再出现它
+    assert 4 not in errors.EXIT_CODES
+    assert all(row.expect_exit != 4 for row in SMOKE.build_smoke())
 
 
 def test_eol_tool_check_mode_agrees_with_scan(repo_root):

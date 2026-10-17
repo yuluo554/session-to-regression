@@ -42,9 +42,9 @@ def write_text(path: Path, text: str) -> Path:
 
 
 def test_generate_is_no_longer_staged(tmp_path, capsys):
-    """退役 exit 4：命令面仍注册，但已不在「阶段未就绪」表里，且真能跑出产物。"""
+    """退役 exit 4：命令面仍注册、真能跑出产物，且命令面里不再有"阶段未就绪"这种可能。"""
     assert "generate" in cli.registered_commands()
-    assert "generate" not in cli.STAGED_COMMANDS
+    assert not hasattr(cli, "STAGED_COMMANDS"), "M5 起 exit 4 整项退役（`plan/04` §1.2 四处同步）"
     assert cli.main(["generate", SP_EPISODE, "--out-dir", str(tmp_path)]) == errors.EXIT_OK
     captured = capsys.readouterr()
     assert "stage_not_ready" not in captured.err

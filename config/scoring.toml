@@ -39,9 +39,15 @@ doc_suffixes = [".md", ".markdown", ".rst", ".txt", ".adoc"]
 # M5 RED/GREEN 双验证（临时副本内进行，不碰用户工作区）
 timeout_seconds = 300
 tmpdir_prefix = "s2r-verify-"
-pytest_command = ["python", "-m", "pytest"]
+# 解释器占位：本文件只声明命令的**形态**，运行期把该 token 换成当前解释器（sys.executable）。
+# 为什么不留裸 `python`：装机后裸 `python` 未必在 PATH 上（本机实测 Windows 的 App Execution
+# Alias 会直接返回非 0），照抄就会把"环境缺件"伪装成"测试没失败"。
+interpreter_token = "{python}"
+pytest_command = ["{python}", "-m", "pytest"]
 red_expectation = "must_fail"
 green_expectation = "must_pass"
+# RED/GREEN 日志摘录的逐字符上限（超出即截断，并显式标 truncated=true）
+log_excerpt_chars = 800
 
 [generate]
 # M4 生成器落点（目标仓库内相对路径；只在探测失败时使用 assumed_*，并在 manifest 标 assumed_convention）

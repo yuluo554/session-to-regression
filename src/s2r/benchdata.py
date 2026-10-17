@@ -435,10 +435,47 @@ def expect_generated(
 #: 才能对 Codex 侧的 before/after 做逐字符对账；`base-drift-1` 刻意给一份**对不上**的基线，
 #: 用来锁住"磁盘已被改动 → 如实降级"这条纪律。
 REPO_FIXTURES: Dict[str, Dict[str, str]] = {
-    "happy-path-1": {"demo/beta/pkg/format.py": "def format_amount(value):\n    return value\n"},
+    # happy-path-1 有两个变体（Claude 改 divide / Codex 改 format_amount），夹具按"两个变体各自的
+    # 编辑前工作区"合并给出——冻结语料实际落在 Codex 变体上（RNG 选型固定），Claude 变体的
+    # 期望值同样由构造侧声明，两个变体的真值都自洽。
+    "happy-path-1": {
+        "demo/beta/pkg/format.py": "def format_amount(value):\n    return value\n",
+        "demo/alpha/src/calc.py": "def divide(a, b):\n    return a / b\n",
+    },
     "ended-without-pass-1": {"demo/alpha/src/calc.py": "def first(items):\n    return items[0]\n"},
     "base-drift-1": {"demo/alpha/src/calc.py": "def first(items):\n    return items[-1]\n"},
+    # M5：RED/GREEN 要在"该编辑发生前的仓库状态"里跑，所以**有内容可验证**的样本都要有仓库夹具。
+    # 反过来说：夹具里的字节不是判据（验证会把日志还原出的 before/after 覆盖上去），
+    # 它的作用是让"日志里的绝对路径 → 仓库内相对路径"这件事**成立**（映射不到就不许硬写，K11）。
+    "structured-patch-1": {"demo/alpha/src/calc.py": "def divide(a, b):\n    return a / b\n"},
+    "multi-bug-1": {
+        "demo/alpha/src/calc.py": "def divide(a, b):\n    return a / b\n",
+        "demo/beta/pkg/format.py": "def slugify(name):\n    return name\n",
+    },
 }
+
+
+def expect_red_green(entries: Sequence[Sequence[Any]]) -> List[Dict[str, Any]]:
+    """声明"这些 episode 的 RED/GREEN 结论应该是什么"（构造侧声明，不由被测实现反推）。
+
+    每条声明五件事：`episode_id`、三态结论、原因码、以及 RED/GREEN 两次跑的退出码。
+    退出码也进真值：它是"两次跑真的发生了"的硬证据——只声明"结论是 verified"的话，
+    一个把两次跑都跳过的实现照样能把真值对上。
+
+    `needs_manual`（生成层没产出内容）的两次退出码是 `None`：**没跑**就是没跑，不许填 0 冒充跑过。
+    """
+    out: List[Dict[str, Any]] = []
+    for episode_id, status, reason, red_exit, green_exit in entries:
+        out.append(
+            {
+                "episode_id": episode_id,
+                "status": status,
+                "reason": reason,
+                "red_exit": red_exit,
+                "green_exit": green_exit,
+            }
+        )
+    return out
 
 
 def sample_happy_path(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) -> Tuple[Builder, Dict[str, Any]]:
@@ -483,6 +520,8 @@ def sample_happy_path(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) 
                 sections=GENERATED_SECTIONS,
                 anchors=["sess-demo-0001", ALPHA_CALC, "wrong value"],
             ),
+            # M5：① 路径 + 加守卫 → 候选断言可证伪 → 修复前必失败（红）、修复后必通过（绿）
+            "expect_red_green": expect_red_green([(builder.session_id + "#5", "verified", "", 1, 0)]),
         }
     # Codex 变体：③ 路径（首选 `FileChange.unified_diff`，同文件的 patch 文本作兜底）
     before = "def format_amount(value):\n    return value\n"
@@ -515,6 +554,10 @@ def sample_happy_path(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) 
             sections=GENERATED_SECTIONS,
             anchors=["sess-demo-0001", BETA_FORMAT, "drops the sign"],
         ),
+        # M5：没有活动断言 = **不能证伪**。修复前那次跑"通过"（红不成立），而修复后那次反而因
+        # 参数是探测值而报错（退出码 1）——正确结论仍是 `unverified` + `red_not_failed`，
+        # **绝不**当成 verified（"测试没失败"与"测试通过了"是两件事）。两个退出码都进真值。
+        "expect_red_green": expect_red_green([(builder.session_id + "#5", "unverified", "red_not_failed", 0, 1)]),
     }
 
 
@@ -553,6 +596,9 @@ def sample_ended_without_pass(rng: Splitmix64, cfg: Mapping[str, Any], session_i
             sections=GENERATED_SECTIONS,
             anchors=["sess-demo-0002", ALPHA_CALC, "empty input"],
         ),
+        # M5：`first(None)` 在 `items[0]` 上抛 TypeError（红），在 `items[0] if items else None` 上返回
+        # None 且候选断言成立（绿）——两个退出码都进真值，证明"两次跑真的发生了"
+        "expect_red_green": expect_red_green([(builder.session_id + "#6", "verified", "", 1, 0)]),
     }
 
 
@@ -595,6 +641,15 @@ def sample_multi_bug(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) -
             sections=GENERATED_SECTIONS,
             anchors=["sess-demo-0003#4", "sess-demo-0003#9", ALPHA_CALC, BETA_FORMAT, "uppercase letters"],
         ),
+        # M5：**逐 episode 各自的验证结论**（不许"一个没通过就整会话不算"）：
+        # 第一个 episode 的候选断言可证伪（红→绿）；第二个没有活动断言 → 修复前那次跑"通过"
+        # （红不成立）、修复后那次反而报错（探测值撞上 `name.lower()`）→ unverified + 未失败
+        "expect_red_green": expect_red_green(
+            [
+                (builder.session_id + "#4", "verified", "", 1, 0),
+                (builder.session_id + "#9", "unverified", "red_not_failed", 0, 1),
+            ]
+        ),
     }
 
 
@@ -618,6 +673,8 @@ def sample_no_failure_signal(rng: Splitmix64, cfg: Mapping[str, Any], session_id
         "expect_generated": expect_generated(
             generated=0, written=0, statuses=[], reasons=[], sections=[], assumed=False
         ),
+        # M5：没有 episode → 验证面也是空集（空集是断言：不许凭空产出验证结论）
+        "expect_red_green": expect_red_green([]),
     }
 
 
@@ -640,6 +697,8 @@ def sample_doc_only(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) ->
         "expect_generated": expect_generated(
             generated=0, written=0, statuses=[], reasons=[], sections=[], assumed=False
         ),
+        # M5：同上——被丢弃的候选不产生验证结论（"没切出来"不等于"验证通过"）
+        "expect_red_green": expect_red_green([]),
     }
 
 
@@ -669,6 +728,10 @@ def sample_ambiguous_old_string(rng: Splitmix64, cfg: Mapping[str, Any], session
             statuses=["needs_manual"],
             reasons=["reconstruction_not_usable:unresolved"],
             sections=[],
+        ),
+        # M5：生成层没产出内容 → 没有可跑的东西 → `needs_manual`（两次退出码是 None：**没跑**）
+        "expect_red_green": expect_red_green(
+            [(builder.session_id + "#4", "needs_manual", "reconstruction_not_usable:unresolved", None, None)]
         ),
     }
 
@@ -709,6 +772,9 @@ def sample_new_file_write(rng: Splitmix64, cfg: Mapping[str, Any], session_id: s
             statuses=["needs_manual"],
             reasons=["reconstruction_not_usable:no_before_image"],
             sections=[],
+        ),
+        "expect_red_green": expect_red_green(
+            [(builder.session_id + "#4", "needs_manual", "reconstruction_not_usable:no_before_image", None, None)]
         ),
     }
 
@@ -754,6 +820,8 @@ def sample_structured_patch(rng: Splitmix64, cfg: Mapping[str, Any], session_id:
             sections=GENERATED_SECTIONS,
             anchors=["sess-demo-0009", ALPHA_CALC, "empty denominator"],
         ),
+        # M5：① 路径的候选断言可证伪：`divide(0, 0)` 修复前抛 ZeroDivisionError（红）、修复后返回 0（绿）
+        "expect_red_green": expect_red_green([(builder.session_id + "#4", "verified", "", 1, 0)]),
     }
 
 
@@ -785,6 +853,9 @@ def sample_base_drift(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) 
             statuses=["needs_manual"],
             reasons=["reconstruction_not_usable:partial"],
             sections=[],
+        ),
+        "expect_red_green": expect_red_green(
+            [(builder.session_id + "#5", "needs_manual", "reconstruction_not_usable:partial", None, None)]
         ),
     }
 
@@ -931,6 +1002,9 @@ def write_corpus(out_dir: Path, cfg: Mapping[str, Any], force: bool = False) -> 
         # M4：生成层期望（骨架数 / 逐 episode 状态与原因 / 候选断言条数 / 必须出现的证据锚点）
         if "expect_generated" in meta:
             truth["expect_generated"] = meta["expect_generated"]
+        # M5：验证层期望（逐 episode 的三态结论 + 原因码 + RED/GREEN 退出码）
+        if "expect_red_green" in meta:
+            truth["expect_red_green"] = meta["expect_red_green"]
         if "expect_error" in meta:
             truth["expect_error"] = meta["expect_error"]
         truth_relative = "truth/{}.truth.json".format(name)
@@ -954,7 +1028,7 @@ def write_corpus(out_dir: Path, cfg: Mapping[str, Any], force: bool = False) -> 
         )
 
     manifest = {
-        "bench_version": 2,
+        "bench_version": 3,
         "generator": "tools/gen_bench.py",
         "seed": SEED,
         "rng_draws": draws,
@@ -983,10 +1057,11 @@ def write_corpus(out_dir: Path, cfg: Mapping[str, Any], force: bool = False) -> 
             "reconstructions",
             # M4 起：生成层事实（骨架数 / 逐 episode 结论与原因 / 候选断言条数 / 证据锚点）
             "generated",
+            # M5 起：验证层事实（逐 episode 的三态结论 + 原因码 + RED/GREEN 退出码）
+            "red_green",
         ],
-        "pending_facts": {
-            "red_green": "M5：RED/GREEN 双验证落地后由 bench 对账退出码",
-        },
+        # M5 起没有"未对账的面"：空表是断言——不许把没对账的字段留在这里当挡箭牌
+        "pending_facts": {},
         "repo_fixtures": repo_files,
         "privacy": {
             "whitelist": {key: list(value) if isinstance(value, tuple) else value for key, value in WHITELIST.items()},

@@ -115,10 +115,11 @@ def test_manifest_declares_coverage_thresholds_and_pending_facts(tmp_path, repo_
     assert "episodes" not in manifest["pending_facts"], "M2 起 episode 已真对账，不该再挂在 pending 里"
     assert "before_after" not in manifest["pending_facts"], "M3 起 before/after 已真对账，pending 里不许再有它"
     assert "generated_tests" not in manifest["pending_facts"], "M4 起生成内容已真对账，pending 里不许再有它"
-    assert set(manifest["pending_facts"]) == {"red_green"}, "未对账的面必须显式列出且只剩 M5"
+    assert manifest["pending_facts"] == {}, "M5 起没有未对账的面：空表是断言（不许留挡箭牌）"
     assert "episode_count" in manifest["checked_facts"], "episode 事实必须进对账面"
     assert "reconstructions" in manifest["checked_facts"], "M3 还原事实必须进对账面"
     assert "generated" in manifest["checked_facts"], "M4 生成事实必须进对账面"
+    assert "red_green" in manifest["checked_facts"], "M5 验证事实必须进对账面"
     assert manifest["thresholds"]["max_false_positive"] == 0
     # 磁盘基线夹具也是冻结物（Codex 侧的全文 before 只能来自这里）
     assert manifest["repo_fixtures"], "磁盘基线夹具必须在台账里"
@@ -159,7 +160,8 @@ def test_bench_reports_ok_on_frozen_corpus(repo_root):
     assert gates["detection"]["rate"] >= gates["detection"]["min_rate"]
     assert gates["false_positive"]["count"] == 0
     assert gates["ledger"]["ok"] and gates["coverage"]["ok"] and gates["files_present"]["ok"]
-    assert report["pending_facts"], "pending 字段必须在报告里可见（不静默当通过）"
+    assert report["pending_facts"] == {}, "M5 起没有未对账的面（空表也要在报告里显式可见）"
+    assert set(report["checked_facts"]) >= {"episode_count", "reconstructions", "generated", "red_green"}
 
 @pytest.mark.parametrize("probe", bench.PROBES)
 def test_probes_are_detected(probe, repo_root):
@@ -207,12 +209,13 @@ def test_missing_manifest_is_an_input_error(tmp_path, repo_root):
     assert "manifest" in str(excinfo.value)
 
 
-def test_summary_lines_expose_failures_and_pending(repo_root):
-    """摘要必须把"未对账的面"（M5）与失败样本都摆出来，不许只有一句 ok。"""
-    lines = bench.summary_lines(bench.run(repo_root / "data" / "bench", limits(repo_root), cfg(repo_root), only=["unsupported_format"]))
-    assert any("pending" in line for line in lines)
-    assert any("red_green" in line for line in lines), "M5 尚未对账的面必须出现在摘要里"
-    assert not any("generated_tests" in line for line in lines), "M4 已真对账的面不该再出现在 pending 行里"
+def test_summary_lines_expose_failures_and_no_pending_left(repo_root):
+    """摘要必须把失败样本摆出来，且 M5 之后**不该再有任何**未对账的面。"""
+    report = bench.run(repo_root / "data" / "bench", limits(repo_root), cfg(repo_root), only=["unsupported_format"])
+    lines = bench.summary_lines(report)
+    assert not any("pending" in line for line in lines), "M5 起 pending 为空，摘要里不该出现它"
+    assert not report["pending_facts"]
+    assert "red_green" in report["checked_facts"], "M5 的验证事实要在对账面清单里可见"
 
 
 def test_generated_mismatch_is_attributed_to_the_sample(tmp_path, repo_root):
@@ -332,3 +335,66 @@ def test_episode_mismatch_is_attributed_to_the_sample(tmp_path, repo_root):
 
     lines = bench.summary_lines(report)
     assert any(("happy-path-1" in line) and ("episode_count" in line) for line in lines), lines
+
+
+# --------------------------------------------------------------------------- #
+# M5：验证层事实（RED/GREEN）
+# --------------------------------------------------------------------------- #
+
+
+def test_red_green_fact_contract_is_locked():
+    """对账字段集是契约：真值声明哪些键、`Verdict.fact()` 就产出哪些键。"""
+    from s2r import verify
+
+    verdict = verify.Verdict(
+        episode_id="sess-demo-1#1", session_id="sess-demo-1", source="claude", source_file="x.jsonl",
+        generated_at="t", episode_status="verified_by_run", generation_status="generated",
+        generation_reason="", assumed_convention=True, assumed_parts=[], test_path="tests/x.py",
+        status=verify.STATUS_VERIFIED, reason=verify.REASON_NONE,
+    )
+    assert set(verdict.fact()) == set(bench.RED_GREEN_FACTS)
+    assert "red_green" in bench.CHECKED_FACTS
+    assert "fold-unverified" in bench.PROBES
+
+
+def test_corpus_really_exercises_red_green(repo_root):
+    """语料必须**真的跑到**验证层：不能只有"声明"没有"实跑"。
+
+    判据：真值里既有 verified（两次跑真的一红一绿），也有 unverified + 未失败（"没有活动断言"那条路径），
+    还有 needs_manual（生成层没产出内容 → 两次退出码为 None）。三者缺一，"三态不折叠"就只是口号。
+    """
+    manifest = bench.load_manifest(repo_root / "data" / "bench")
+    statuses = set()
+    reasons = set()
+    red_exits = set()
+    green_exits = set()
+    for sample in manifest["samples"]:
+        truth = json.loads(serialize.read_text(repo_root / "data" / "bench" / sample["truth"]))
+        for item in truth.get("expect_red_green") or []:
+            statuses.add(item["status"])
+            if item["reason"]:
+                reasons.add(item["reason"])
+            red_exits.add(item["red_exit"])
+            green_exits.add(item["green_exit"])
+    assert statuses == {"verified", "unverified", "needs_manual"}, statuses
+    assert "red_not_failed" in reasons, "语料里要有『测试没失败』这条路径（needs_manual 骨架不许被当成通过）"
+    assert 1 in red_exits, "必须有一条真的一红（RED 退出码 1）"
+    assert 0 in green_exits, "必须有一条真的一绿（GREEN 退出码 0）"
+    assert None in red_exits, "没有内容可跑的条目两次退出码必须是 None（没跑就是没跑）"
+
+
+def test_red_green_mismatch_is_attributed_to_the_episode(tmp_path, repo_root):
+    """验证层对账必须点名到 `red_green[<episode>].<键>`（否则"没验过"与"验过"分不清）。"""
+    copy = tmp_path / "bench"
+    shutil.copytree(str(repo_root / "data" / "bench"), str(copy))
+    truth = copy / "truth" / "structured-patch-1.truth.json"
+    data = json.loads(serialize.read_text(truth))
+    data["expect_red_green"][0]["status"] = "unverified"
+    _write_json(truth, data)
+
+    report = bench.run(copy, limits(repo_root), cfg(repo_root), only=["structured_patch"])
+    entry = [item for item in report["samples"] if item["sample"] == "structured-patch-1"][0]
+    assert entry["status"] == "fail", entry
+    assert any("red_green[sess-demo-0009#4].status" in item for item in entry["mismatches"]), entry["mismatches"]
+    assert report["status"] != "ok"
+    assert any("red_green[sess-demo-0009#4].status" in line for line in bench.summary_lines(report))

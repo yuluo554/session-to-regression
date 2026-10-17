@@ -19,7 +19,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
-from . import benchdata, episode as episode_mod, events, generate as generate_mod, readers, reconstruct as reconstruct_mod, serialize
+from . import benchdata, episode as episode_mod, events, generate as generate_mod, readers, reconstruct as reconstruct_mod, serialize, verify as verify_mod
 from .errors import InputUnavailable, UnsupportedFormat
 
 MANIFEST_NAME = benchdata.MANIFEST_NAME
@@ -34,9 +34,11 @@ PROBES = (
     "keep-filtered",
     "swap-before-after",
     "drop-candidate-assert",
+    "fold-unverified",
 )
 
-#: 对账的字段集（与 manifest 的 checked_facts 对应；`reconstructions` 属 M3、`generated` 属 M4）
+#: 对账的字段集（与 manifest 的 checked_facts 对应；`reconstructions` 属 M3、`generated` 属 M4、
+#: `red_green` 属 M5）
 CHECKED_FACTS = (
     "source",
     "format_version",
@@ -55,6 +57,8 @@ CHECKED_FACTS = (
     "reconstructions",
     # M4 起：生成层事实（真值里的 expect_generated 声明骨架数 / 逐 episode 状态与原因 / 候选断言条数 / 锚点）
     "generated",
+    # M5 起：验证层事实（真值里的 expect_red_green 逐 episode 声明三态结论 / 原因码 / RED+GREEN 退出码）
+    "red_green",
 )
 
 #: 逐文件对账的键（真值可只声明其中一部分；键集合由测试锁死）
@@ -72,6 +76,9 @@ GENERATED_FACTS = (
     "assumed_convention",
     "anchor_fragments",
 )
+
+#: 验证层逐 episode 对账的键（同上：真值声明哪些键、就逐键比对）
+RED_GREEN_FACTS = ("episode_id", "status", "reason", "red_exit", "green_exit")
 
 
 def load_manifest(data_dir: Path) -> Mapping[str, Any]:
@@ -118,7 +125,9 @@ def _facts(file_read: readers.FileRead, expected: Mapping[str, Any], cfg: Mappin
     session_files = {event.session_id: str(file_read.path) for event in file_read.events}
     split = episode_mod.split(file_read.events, cfg, session_files=session_files)
     reconstruction = reconstruct_mod.reconstruct_session(file_read, cfg, repo=repo)
-    generation = generate_mod.plan_session(file_read, cfg, repo=repo)
+    # 生成层与验证层共用同一次规划（还原是最贵的一步，别为两个事实面各跑一遍）
+    detailed = generate_mod.plan_session_detailed(file_read, cfg, repo=repo)
+    generation = [skeleton for _episode, skeleton, _files in detailed]
     declared_generated = expected.get("generated") if isinstance(expected.get("generated"), Mapping) else {}
     anchors = declared_generated.get("anchor_fragments") or []
     return {
@@ -135,7 +144,25 @@ def _facts(file_read: readers.FileRead, expected: Mapping[str, Any], cfg: Mappin
         "filter_reasons": sorted(str(item["reason"]) for item in split.filtered),
         "reconstructions": [item.fact() for item in reconstruction.files],
         "generated": generate_mod.summarize(generation, anchors=anchors),
+        "red_green": _red_green_facts(detailed, cfg, repo),
     }
+
+
+def _red_green_facts(detailed: Sequence[Any], cfg: Mapping[str, Any], repo: Optional[str]) -> List[Dict[str, Any]]:
+    """验证层事实：有目标仓库就**真跑** RED/GREEN，没有就如实记"没有仓库可验证"。
+
+    为什么"没有仓库"也要产出事实（而不是跳过）：那样真值里"这个 episode 该被验证"的声明
+    就会被无声吞掉。空集/环境不可用都是**显式结论**，让差异能被逐条点名。
+    """
+    plans = [verify_mod.Plan(episode, skeleton, files) for episode, skeleton, files in detailed]
+    if not repo:
+        return verify_mod.red_green_facts(verify_mod.unreachable_verdicts(plans))
+    try:
+        return verify_mod.red_green_facts(verify_mod.verify_plans(plans, cfg, repo))
+    except InputUnavailable:
+        # 仓库夹具不在位（台账门已经会报）：这里如实落"环境不可用"，让逐字段对账点名，
+        # 而不是让基准整体崩掉（崩掉会被误读成"环境问题"而不是"数据没对上"）
+        return verify_mod.red_green_facts(verify_mod.unreachable_verdicts(plans))
 
 
 def compare(expected: Mapping[str, Any], actual: Mapping[str, Any]) -> List[str]:
@@ -152,9 +179,32 @@ def compare(expected: Mapping[str, Any], actual: Mapping[str, Any]) -> List[str]
             # 生成层逐键点名（生成事实里含不可对账的明细，故不整体比较）
             mismatches.extend(compare_generated(expected[field], actual.get(field)))
             continue
+        if field == "red_green":
+            # 验证层逐 episode 点名（同样含不可对账的日志摘录）
+            mismatches.extend(compare_red_green(expected[field], actual.get(field)))
+            continue
         want, got = expected[field], actual.get(field)
         if want != got:
             mismatches.append("{}: 期望 {!r}，实际 {!r}".format(field, want, got))
+    return mismatches
+
+
+def compare_red_green(expected: Any, actual: Any) -> List[str]:
+    """验证层逐 episode 对账：差异点名到 `red_green[<episode>].<键>`（并给出两边取值）。"""
+    mismatches: List[str] = []
+    want = list(expected or [])
+    got = list(actual or [])
+    if len(want) != len(got):
+        mismatches.append("red_green: 期望 {} 项，实际 {} 项".format(len(want), len(got)))
+    for index in range(min(len(want), len(got))):
+        left = want[index] if isinstance(want[index], Mapping) else {}
+        right = got[index] if isinstance(got[index], Mapping) else {}
+        label = "red_green[{}]".format(right.get("episode_id") or left.get("episode_id") or index)
+        for key in RED_GREEN_FACTS:
+            if key not in left:
+                continue
+            if left[key] != right.get(key):
+                mismatches.append("{}.{}: 期望 {!r}，实际 {!r}".format(label, key, left[key], right.get(key)))
     return mismatches
 
 
@@ -220,6 +270,13 @@ def _apply_probe(probe: Optional[str], actual: Dict[str, Any]) -> Dict[str, Any]
         generated = actual.get("generated")
         if isinstance(generated, dict):
             generated["candidate_count"] = 0
+    elif probe == "fold-unverified":
+        # 模拟 M5 最典型的空转：把 `unverified` 折叠成 `verified`（等价于"RED 判据恒真"）。
+        # 注入打在判定路径上：三态被折成一态，未验证的项冒充通过。
+        for item in actual.get("red_green") or []:
+            if isinstance(item, dict) and item.get("status") == "unverified":
+                item["status"] = "verified"
+                item["reason"] = ""
     return actual
 
 
@@ -343,6 +400,10 @@ def _check_sample(
     if "expect_generated" in truth:
         expected = dict(expected)
         expected["generated"] = dict(truth["expect_generated"] or {})
+    # M5：验证层期望（逐 episode 三态结论 + 原因码 + RED/GREEN 退出码）
+    if "expect_red_green" in truth:
+        expected = dict(expected)
+        expected["red_green"] = list(truth["expect_red_green"] or [])
     expect_error = truth.get("expect_error")
     # 磁盘基线：Codex 侧的全文 before 只能来自"该编辑发生前的磁盘状态"（随语料冻结）
     repo_rel = str(sample.get("repo") or "")

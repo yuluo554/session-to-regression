@@ -496,7 +496,7 @@ def module_of(file_path: str, convention: Convention) -> str:
     """改动文件 → 点分模块名（有仓库根就按相对路径取，没有就按日志路径形态取）。"""
     relative = file_path
     if convention.root:
-        candidate = _under_root(file_path, Path(convention.root))
+        candidate = relative_under_root(file_path, Path(convention.root))
         if candidate is not None:
             relative = candidate
     relative = relative.replace("\\", "/").lstrip("/")
@@ -513,7 +513,15 @@ def _is_python(file_path: str) -> bool:
     return file_path.lower().endswith(PYTHON_SUFFIX)
 
 
-def _under_root(file_path: str, root: Path) -> Optional[str]:
+def relative_under_root(file_path: str, root: Path) -> Optional[str]:
+    """日志里的文件路径 → 目标仓库内的**相对路径**（仓库里真的存在该文件时才认）。
+
+    为什么必须"真的存在"：日志里的路径可能是另一个项目、也可能已经改名——把内容硬写到
+    一个猜出来的相对路径上，等于往用户仓库里**新建**文件（K11 红线）。所以这里只做映射，
+    映射不出来就如实返回 None，由调用方落"环境不可用"一类的原因。
+
+    M5 的隔离副本写盘（verify）与 M4 的模块名推导（module_of）共用**这一份**实现。
+    """
     candidates = [] if Path(file_path).is_absolute() else [file_path]
     candidates.append(file_path.replace("\\", "/").lstrip("/"))
     for candidate in candidates:
@@ -905,6 +913,44 @@ class GenerationRun:
         return serialize.dumps_json(self.to_dict())
 
 
+def split_episodes(file_read: Any, cfg: Mapping[str, Any]) -> Dict[str, Any]:
+    """会话 → episode 实体（`episode_id → Episode`）。
+
+    单独成函数是为了让**生成层与验证层走同一条切分路径**：`episode_id` 的形状、起点序号、
+    `end_ts` 这些字段一旦两边各切一次就会出现"生成看的是 A、验证跑的是 B"的错位。
+    """
+    session_id = _session_id_of(file_read)
+    split = episode_mod.split(file_read.events, cfg, session_files={session_id: str(getattr(file_read, "path", events.UNKNOWN))})
+    return {item.episode_id: item for item in split.episodes}
+
+
+def related_reconstructions(
+    file_read: Any,
+    cfg: Mapping[str, Any],
+    repo: Optional[str] = None,
+) -> Tuple[List[str], Dict[str, List[reconstruct_mod.Reconstruction]]]:
+    """会话 → `(episode 顺序, episode_id → 该 episode 相关的还原结果)`。
+
+    M4 生成与 M5 验证共用这一份：验证要按 episode 把 `before`/`after` 写回副本，
+    如果两边对"这个 episode 由哪些文件构成"的理解不一致，RED/GREEN 就不再是同一个测试的结论。
+    还原是整条链上最贵的一步，所以顺序与归组一次算完（别为排序再跑一遍还原）。
+    """
+    reconstruction = reconstruct_mod.reconstruct_session(file_read, cfg, repo=repo)
+    by_file: Dict[str, List[reconstruct_mod.Reconstruction]] = {}
+    for item in reconstruction.files:
+        by_file.setdefault(str(item.file), []).append(item)
+    order: List[str] = []
+    by_episode: Dict[str, List[reconstruct_mod.Reconstruction]] = {}
+    for verdict in reconstruction.episodes:
+        episode_id = str(verdict.get("episode_id", events.UNKNOWN))
+        order.append(episode_id)
+        related: List[reconstruct_mod.Reconstruction] = []
+        for item in verdict.get("files") or []:
+            related.extend(by_file.get(str(item.get("file")), []))
+        by_episode[episode_id] = related
+    return order, by_episode
+
+
 def plan_session(
     file_read: Any,
     cfg: Mapping[str, Any],
@@ -912,26 +958,33 @@ def plan_session(
     convention: Optional[Convention] = None,
 ) -> List[Skeleton]:
     """会话 → 逐 episode 的骨架结论（**不写盘**；基准对账与 CLI 共用同一条路径）。"""
-    probe = convention if convention is not None else probe_conventions(repo, cfg)
-    reconstruction = reconstruct_mod.reconstruct_session(file_read, cfg, repo=repo)
-    session_id = _session_id_of(file_read)
-    split = episode_mod.split(file_read.events, cfg, session_files={session_id: str(getattr(file_read, "path", events.UNKNOWN))})
-    entities = {item.episode_id: item for item in split.episodes}
-    by_file: Dict[str, List[reconstruct_mod.Reconstruction]] = {}
-    for item in reconstruction.files:
-        by_file.setdefault(str(item.file), []).append(item)
+    return [skeleton for _episode, skeleton, _files in plan_session_detailed(file_read, cfg, repo=repo, convention=convention)]
 
-    skeletons: List[Skeleton] = []
-    for verdict in reconstruction.episodes:
-        episode_id = str(verdict.get("episode_id", events.UNKNOWN))
+
+def plan_session_detailed(
+    file_read: Any,
+    cfg: Mapping[str, Any],
+    repo: Optional[str] = None,
+    convention: Optional[Convention] = None,
+) -> List[Tuple[Any, Skeleton, List[reconstruct_mod.Reconstruction]]]:
+    """同 `plan_session`，但**同时交出** episode 实体与它相关的还原结果。
+
+    M5 的验证需要这三样对齐（谁的测试、哪些文件的 before/after）——如果验证侧再算一遍
+    episode 或还原，就会出现"生成看的是 A、验证跑的是 B"的错位。还原是整条链上最贵的一步，
+    所以只在这里算一次，由两个调用面共享。
+    """
+    probe = convention if convention is not None else probe_conventions(repo, cfg)
+    entities = split_episodes(file_read, cfg)
+    order, related_by_episode = related_reconstructions(file_read, cfg, repo=repo)
+
+    out: List[Tuple[Any, Skeleton, List[reconstruct_mod.Reconstruction]]] = []
+    for episode_id in order:
         entity = entities.get(episode_id)
         if entity is None:
             continue
-        related: List[reconstruct_mod.Reconstruction] = []
-        for item in verdict.get("files") or []:
-            related.extend(by_file.get(str(item.get("file")), []))
-        skeletons.append(plan_episode(entity, related, file_read, cfg, probe))
-    return skeletons
+        files = related_by_episode.get(episode_id, [])
+        out.append((entity, plan_episode(entity, files, file_read, cfg, probe), files))
+    return out
 
 
 def _session_id_of(file_read: Any) -> str:

@@ -26,9 +26,9 @@ def read_json(path: Path):
 
 
 def test_reconstruct_is_no_longer_staged(capsys):
-    """退役 exit 4：命令面仍注册，但已不在「阶段未就绪」表里。"""
+    """退役 exit 4：命令面仍注册、真能跑出产物，且命令面里不再有"阶段未就绪"这种可能。"""
     assert "reconstruct" in cli.registered_commands()
-    assert "reconstruct" not in cli.STAGED_COMMANDS
+    assert not hasattr(cli, "STAGED_COMMANDS"), "M5 起 exit 4 整项退役（`plan/04` §1.2 四处同步）"
     assert cli.main(["reconstruct", str(CLAUDE_SAMPLE)]) == errors.EXIT_OK
     assert "stage_not_ready" not in capsys.readouterr().err
 

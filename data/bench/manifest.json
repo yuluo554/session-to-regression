@@ -1,5 +1,5 @@
 {
-  "bench_version": 2,
+  "bench_version": 3,
   "checked_facts": [
     "source",
     "format_version",
@@ -13,7 +13,8 @@
     "episode_statuses",
     "episode_count",
     "reconstructions",
-    "generated"
+    "generated",
+    "red_green"
   ],
   "coverage": {
     "min_count_by_type": {
@@ -46,9 +47,7 @@
     "claude",
     "codex"
   ],
-  "pending_facts": {
-    "red_green": "M5：RED/GREEN 双验证落地后由 bench 对账退出码"
-  },
+  "pending_facts": {},
   "privacy": {
     "note": "全部为假值；假绝对路径只保留通用盘符形态，后缀段为假项目名",
     "whitelist": {
@@ -68,6 +67,11 @@
   },
   "repo_fixtures": [
     {
+      "file": "repo/happy-path-1/demo/alpha/src/calc.py",
+      "sample": "happy-path-1",
+      "sha256": "4f719d2b104c917e0ce623395e00e0c44dbf1940414d87fc2b66ede6e3d67b12"
+    },
+    {
       "file": "repo/happy-path-1/demo/beta/pkg/format.py",
       "sample": "happy-path-1",
       "sha256": "6b6b84e5fd8961f429f9d2cdbf7658cf33c25b4ff6c09c246c32e6c8b233419f"
@@ -76,6 +80,21 @@
       "file": "repo/ended-without-pass-1/demo/alpha/src/calc.py",
       "sample": "ended-without-pass-1",
       "sha256": "c9f28bea98a2738fd61db45b1a927b35357a4a9a22303e1343450814dea7c632"
+    },
+    {
+      "file": "repo/multi-bug-1/demo/alpha/src/calc.py",
+      "sample": "multi-bug-1",
+      "sha256": "4f719d2b104c917e0ce623395e00e0c44dbf1940414d87fc2b66ede6e3d67b12"
+    },
+    {
+      "file": "repo/multi-bug-1/demo/beta/pkg/format.py",
+      "sample": "multi-bug-1",
+      "sha256": "2efe79021363ddc041060572a4bd7875205724c728d168a80879590cfc8b6274"
+    },
+    {
+      "file": "repo/structured-patch-1/demo/alpha/src/calc.py",
+      "sample": "structured-patch-1",
+      "sha256": "4f719d2b104c917e0ce623395e00e0c44dbf1940414d87fc2b66ede6e3d67b12"
     },
     {
       "file": "repo/base-drift-1/demo/alpha/src/calc.py",
@@ -94,7 +113,7 @@
       "sample": "happy-path-1",
       "sha256": "fb340347e5e7f9c08dae03d679ec9b754e437a889c30b9219124f9b28a7934cb",
       "truth": "truth/happy-path-1.truth.json",
-      "truth_sha256": "d1020a97ed9958f9fc399383b02c24ec099c29787a47f41036126f3cbe0af995"
+      "truth_sha256": "0d32787784c8c40c3cc3874c6352d001fab3e75086881b8f2c8b382cda2dc02e"
     },
     {
       "bytes": 2320,
@@ -105,18 +124,18 @@
       "sample": "ended-without-pass-1",
       "sha256": "6009ddedf3374eca0d6ed2f175798ebf6762e0b3f959dea6f1757e853d4db062",
       "truth": "truth/ended-without-pass-1.truth.json",
-      "truth_sha256": "e3e72a7ad750669ae1ada210fd0561f11a167ea4d9a339f90f2210b7edcff4db"
+      "truth_sha256": "c25e9d5d815fa88150bf462cc682fa9e435d5b5cc5d446079c371678a0bd44ae"
     },
     {
       "bytes": 6164,
       "episode_type": "multi_bug",
       "file": "claude/multi-bug-1.jsonl",
       "harness": "claude",
-      "repo": "",
+      "repo": "repo/multi-bug-1",
       "sample": "multi-bug-1",
       "sha256": "89f0d1e74d72ce39df5a61210cc41266cbe81782d333380c06617c95b54b80c9",
       "truth": "truth/multi-bug-1.truth.json",
-      "truth_sha256": "2aaddea3d00a243dedad9a129204906dc4d9edc63294fccfaaae6554396f5eaf"
+      "truth_sha256": "7f45638de37c948ee19b49ff972c79856187622787237e4b26b043f944596c4e"
     },
     {
       "bytes": 1720,
@@ -127,7 +146,7 @@
       "sample": "no-failure-signal-1",
       "sha256": "657fdeba912fbb80070c4779d599ecfbc54729af144a8a4070eae9cd3b2f0298",
       "truth": "truth/no-failure-signal-1.truth.json",
-      "truth_sha256": "cefece4837e5efaee5dc117b516da3b23b862e85bfae7b67ffcd0f896ee1d1a2"
+      "truth_sha256": "a857e5a034aa803386bdea54b5813e319afbcf369d523ff849708ccb88acc1f1"
     },
     {
       "bytes": 2576,
@@ -138,7 +157,7 @@
       "sample": "doc-only-1",
       "sha256": "9691be1e64dd29ec54a154dfea012717b0926ce465d0852c27e728c92a31cb11",
       "truth": "truth/doc-only-1.truth.json",
-      "truth_sha256": "95c51c9b3fab032b6bcbf56460fd2519612bc5929013671cfb6d234bb5f9f3c5"
+      "truth_sha256": "d471427f9533ac6cefa485c5d0698e173171623eecb895aa2c6e09985cf35156"
     },
     {
       "bytes": 2641,
@@ -149,7 +168,7 @@
       "sample": "ambiguous-old-string-1",
       "sha256": "e32807e614e17f8f7cf605bac18fdd9f2d85fc4f5960db810eb88819e41c2536",
       "truth": "truth/ambiguous-old-string-1.truth.json",
-      "truth_sha256": "fa8b4364aa0ea8a144de23b7011c0e86c81965317157b630009171d21c71116e"
+      "truth_sha256": "dd07b12e822385d12f0351f97e5054b0c7437073d1c022f78a4c8b6ea2219bf7"
     },
     {
       "bytes": 2559,
@@ -160,7 +179,7 @@
       "sample": "new-file-write-1",
       "sha256": "c07ba05f3d9bfd3490803d3e026ab6bd1ffb5375da7d0bcc950fb453359205e4",
       "truth": "truth/new-file-write-1.truth.json",
-      "truth_sha256": "3d94f0957e23358f7c2d1697484c55eb5968b5b5f26efa910dada6c195dbd155"
+      "truth_sha256": "f23a029b83b6050f114da0c446280bef6d07f18b0c4d19d91fa4c3ccb3290fde"
     },
     {
       "bytes": 146,
@@ -178,11 +197,11 @@
       "episode_type": "structured_patch",
       "file": "claude/structured-patch-1.jsonl",
       "harness": "claude",
-      "repo": "",
+      "repo": "repo/structured-patch-1",
       "sample": "structured-patch-1",
       "sha256": "75298d2eabf102589d85b6eea4c080cd5b408425ba5f2d62ee35c5f84b4e94ea",
       "truth": "truth/structured-patch-1.truth.json",
-      "truth_sha256": "d8bd80ca6f6fcc574fc90a84cc2b09eb8833104c2f89bea08ba6418b507b4c01"
+      "truth_sha256": "4ff3d932c30dfe9b3433e6482afee9b834b161d2c5b294872ea6827bd24a7883"
     },
     {
       "bytes": 2095,
@@ -193,7 +212,7 @@
       "sample": "base-drift-1",
       "sha256": "7f4035be16870030f69117811318e5ad7664e93d8ff729266a3e660226707538",
       "truth": "truth/base-drift-1.truth.json",
-      "truth_sha256": "2ee3b989670c5c7f5810a3dad76aaedcd30ddb2c726d661006ec9398a5cb7f42"
+      "truth_sha256": "fc98a5584c3fc5ad6ab0ff392e450bac7fc11a774aa1ebfe4bcc954c370ff2df"
     }
   ],
   "seed": 20261017,

@@ -55,6 +55,15 @@
       "status": "partial"
     }
   ],
+  "expect_red_green": [
+    {
+      "episode_id": "sess-demo-0010#5",
+      "green_exit": null,
+      "reason": "reconstruction_not_usable:partial",
+      "red_exit": null,
+      "status": "needs_manual"
+    }
+  ],
   "input_file": "codex/base-drift-1.jsonl",
   "sample": "base-drift-1",
   "session_id": "sess-demo-0010"

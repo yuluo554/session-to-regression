@@ -48,16 +48,19 @@ def test_config_without_subcommand_is_usage_error(capsys):
     assert "config" in capsys.readouterr().err
 
 
-def test_staged_commands_report_milestone_and_produce_nothing(capsys):
-    """未交付命令：exit 4 + 报出所属里程碑 + **stdout 为空**（不伪造空结果）。"""
-    assert set(STAGED_ARGS) == set(cli.registered_commands()) - {"selftest", "config"}
-    for command in sorted(cli.STAGED_COMMANDS):
-        code = cli.main([command] + list(STAGED_ARGS[command]))
-        captured = capsys.readouterr()
-        assert code == errors.EXIT_STAGE_NOT_READY, command
-        assert "stage_not_ready" in captured.err, command
-        assert cli.STAGED_COMMANDS[command] in captured.err, command
-        assert captured.out == "", command
+def test_exit_code_4_is_retired_and_no_command_is_staged(capsys):
+    """退出码 4（阶段未就绪）**整项退役**：五条业务命令全部交付，"未交付"不再是结论。
+
+    退役四处（同一次提交）：`cli` 命令表 / `tools/ci_smoke.py` 期望值 / README 退出码表 / `plan/04·06`。
+    """
+    assert errors.EXIT_CODES == (errors.EXIT_OK, errors.EXIT_CHECK_FAILED, errors.EXIT_USAGE, errors.EXIT_DEPENDENCY_MISSING)
+    assert not hasattr(errors, "EXIT_STAGE_NOT_READY"), "常量还在 = 幽灵语义复活"
+    assert not hasattr(errors, "StageNotReady")
+    assert not hasattr(cli, "STAGED_COMMANDS")
+    assert not hasattr(cli, "_make_staged_handler")
+    # 每条业务命令都必须能在冒烟表里找到真实期望退出码（缺一条 expected_exit 当场 KeyError）
+    for command in sorted(set(SMOKE.INVOCATIONS)):
+        assert SMOKE.expected_exit(command) in errors.EXIT_CODES, command
 
 
 def test_selftest_ok_with_explicit_config(repo_root, capsys):
@@ -129,12 +132,11 @@ def test_config_path_prints_resolved_file(config_path, capsys):
     assert printed.resolve() == config_path.resolve()
 
 
-def test_registered_commands_match_staged_map():
-    """已注册子命令 = 冒烟表覆盖的命令 ∪ 无参的两条；未交付的就是"已注册但不在已交付期望表"的那些。"""
+def test_registered_commands_match_the_smoke_table():
+    """已注册子命令 = 冒烟表覆盖的命令 ∪ 无参的两条；每条业务命令都要有真实期望退出码。"""
     registered = set(cli.registered_commands())
     assert registered == set(SMOKE.INVOCATIONS) | {"selftest", "config"}
-    assert set(cli.STAGED_COMMANDS) <= registered
-    assert set(cli.STAGED_COMMANDS) == registered - set(SMOKE.DELIVERED_EXPECT) - {"selftest", "config"}
+    assert set(SMOKE.DELIVERED_EXPECT) == registered - {"selftest", "config"}
 
 
 def test_console_script_target_is_importable(repo_root):

@@ -44,9 +44,11 @@ SCHEMA: Sequence[Tuple[str, type]] = (
     ("episode.doc_suffixes", list),
     ("verify.timeout_seconds", int),
     ("verify.tmpdir_prefix", str),
+    ("verify.interpreter_token", str),
     ("verify.pytest_command", list),
     ("verify.red_expectation", str),
     ("verify.green_expectation", str),
+    ("verify.log_excerpt_chars", int),
     ("generate.tests_dir", str),
     ("generate.assumed_tests_dir", str),
     ("generate.manifest_path", str),
@@ -69,7 +71,13 @@ POSITIVE_KEYS = (
     "episode.max_result_chars",
     "episode.version_probe_lines",
     "verify.timeout_seconds",
+    "verify.log_excerpt_chars",
 )
+
+#: `[verify]` 的期望值枚举：M5 的判据**只在口径文件里取值**，取值必须落在这两个语义内
+#: （`must_fail` = 修复前必须失败；`must_pass` = 修复后必须通过）。写别的值即配置错误——
+#: 否则"判据恒真"这类退化会以"改了配置"的形式合法化。
+VERIFY_EXPECTATIONS = ("must_fail", "must_pass")
 
 #: 必须为非负整数的键（≥0）
 NON_NEGATIVE_KEYS = (
@@ -178,6 +186,10 @@ def validate_config(config: Dict[str, Any], origin: str = "<config>") -> None:
             problems.append("{} 不得为空".format(dotted))
         elif any(not isinstance(item, str) for item in value):
             problems.append("{} 的元素必须是字符串".format(dotted))
+    for dotted in ("verify.red_expectation", "verify.green_expectation"):
+        found, value = _lookup(config, dotted)
+        if found and value not in VERIFY_EXPECTATIONS:
+            problems.append("{} 只认 {}（实际 {}）".format(dotted, "/".join(VERIFY_EXPECTATIONS), value))
     if problems:
         raise ConfigError("配置取值越界（{}）: {}".format(origin, "; ".join(problems)))
 

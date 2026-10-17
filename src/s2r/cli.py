@@ -12,34 +12,31 @@
 ``s2r bench``                   M1 合成会话基准（植入真值）
 ``s2r reconstruct``             M3 差分还原器
 ``s2r generate``                M4 pytest 骨架生成器（模板 + AST，零模型）
-``s2r verify`` / ``s2r run``    M5 RED/GREEN 验证 + manifest
+``s2r verify``                  M5 单 episode 的 RED/GREEN 隔离验证（不验证不落盘）
+``s2r run``                     M5 全链路（读取 → 切分 → 还原 → 生成 → 验证 → manifest）
 ==============================  ==============================================
 
-未交付命令**不产出任何结果**，只报 ``stage_not_ready`` 与 exit 4（绝不伪造空结果）；
-每个里程碑落地时该退出码整项退役（CLI + 文档 + 测试三处同步，见 plan/04）。
+骨架期的 ``stage_not_ready`` / exit 4 已随 M5 **整项退役**：五条业务命令全部交付，
+"未交付"不再是一种可能的结论（见 `plan/04-模块详设.md` §1.2）。
 """
 
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import platform
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Sequence, Tuple
 
-from . import __version__, bench as bench_mod, benchdata, config as config_mod, events, generate as generate_mod, paths as paths_mod, readers, reconstruct as reconstruct_mod, serialize, stdio
-from .errors import (EXIT_CHECK_FAILED, EXIT_DEPENDENCY_MISSING, EXIT_OK, EXIT_STAGE_NOT_READY, EXIT_USAGE,
-                     InputUnavailable, S2RError, StageNotReady, UsageError)
+from . import __version__, bench as bench_mod, benchdata, config as config_mod, events, generate as generate_mod, paths as paths_mod, readers, reconstruct as reconstruct_mod, serialize, stdio, verify as verify_mod
+from .errors import (EXIT_CHECK_FAILED, EXIT_DEPENDENCY_MISSING, EXIT_OK, EXIT_USAGE,
+                     DependencyMissing, InputUnavailable, S2RError, UsageError)
 
 PROG = "s2r"
 
-#: 尚未交付的子命令 → 所属里程碑（里程碑落地时整项摘除，并同步 tools/ci_smoke.py、README、plan）
-STAGED_COMMANDS: Dict[str, str] = {
-    "verify": "M5",
-    "run": "M5",
-}
+#: `selftest` 与 `verify`/`run` 共用同一个依赖判据（pytest 不可用 → exit 3，不伪装成"零条结果"）
+pytest_available = verify_mod.pytest_available
 
 
 class Check(NamedTuple):
@@ -239,11 +236,126 @@ def cmd_generate(args: argparse.Namespace) -> int:
     return EXIT_OK if counts[generate_mod.STATUS_GENERATED] else EXIT_CHECK_FAILED
 
 
+def cmd_verify(args: argparse.Namespace) -> int:
+    """M5：一个 episode 的 RED/GREEN 隔离验证（在目标仓库的临时副本里跑，不碰工作区）。
+
+    流程：日志证据 → 还原 `before` → 副本里跑新测试（**必须失败**）→ 换 `after` → 再跑（**必须通过**）。
+    只有两关都过的测试才写进目标仓库的测试目录（不验证不落盘）；结论逐条进 manifest 的同一份 schema。
+
+    退出码：0 = verified；1 = 无 verified（unverified / needs_manual）；2 = 用法/输入不可用；3 = 缺 pytest。
+    """
+    config = config_mod.load_config(args.config)
+    limits = readers.limits_from_config(config)
+    require_pytest()
+    session_ref, fix_seq = generate_mod.parse_episode_ref(args.episode)
+    session_path = reconstruct_mod.resolve_session_file(session_ref, limits, roots=None)
+    file_read = reconstruct_mod.load_session(session_path, limits)
+    plans = verify_mod.plans_of_session(file_read, config, repo=args.repo)
+    wanted = [item for item in plans if item.episode_id.endswith("#" + str(fix_seq))]
+    if not wanted:
+        raise InputUnavailable(
+            "会话 {} 里没有 episode {}".format(file_read.session_id, "#" + str(fix_seq)),
+            hint="可用: {}".format(", ".join(sorted(item.episode_id for item in plans)) or "（该会话没有切出任何 episode）"),
+        )
+    verdicts = verify_mod.verify_plans(wanted, config, args.repo, timeout=args.timeout)
+    # 没有目标仓库时**不可能**有 verified（验证必须有仓库），所以这里的空表与"没通过"是同一件事
+    written = verify_mod.write_verified(args.repo, verdicts) if args.repo else []
+    report = verify_mod.build_manifest(config, args.repo or "", verdicts, sources={"session": str(session_path)})
+    report["written"] = list(written)
+    sys.stdout.write(serialize.dumps_json(report))
+    _write_report(args.out_dir, "verify.json", report)
+    counts = verify_mod.summarize(verdicts)
+    sys.stderr.write(
+        "verify: {}/{} → {} 条结论（verified {}，unverified {}，needs_manual {}），写出 {} 个测试{}\n".format(
+            file_read.source, file_read.session_id, counts["entries"], counts["verified"],
+            counts["unverified"], counts["needs_manual"], counts["written"],
+            "（{}）".format(", ".join(written)) if written else "",
+        )
+    )
+    return EXIT_OK if counts["verified"] else EXIT_CHECK_FAILED
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    """M5 全链路：读取日志 → 切分 → 还原 → 生成 → 隔离验证 → 写 manifest（一条命令）。
+
+    目标仓库的**测试目录**只收 `verified` 的骨架；`regression/manifest.json` 记录每一条的结论与原因
+    （含 RED/GREEN 退出码与可复现的日志摘录），"没验证过"与"验证失败"在 manifest 里分得清。
+
+    退出码：0 = 至少一条 verified；1 = 无 verified；2 = 用法/输入不可用；3 = 缺 pytest。
+    """
+    config = config_mod.load_config(args.config)
+    limits = readers.limits_from_config(config)
+    require_pytest()
+    target = args.target
+    if not Path(target).is_dir():
+        raise InputUnavailable("目标仓库不存在或不是目录: {}".format(target))
+
+    roots, unavailable = _resolve_run_roots(args)
+    if not roots:
+        raise InputUnavailable(
+            "两个 harness 的日志根都定位不到: {}".format("; ".join(unavailable)),
+            hint="显式传 --claude-root / --codex-root，或设置环境变量 {} / {}".format(
+                paths_mod.ENV_CLAUDE_ROOT, paths_mod.ENV_CODEX_ROOT
+            ),
+        )
+    scan = readers.scan([], limits, roots=[roots[key] for key in sorted(roots)])
+    verdicts = verify_mod.verify_many(
+        [verify_mod.plans_of_session(item, config, repo=target) for item in scan.files],
+        config,
+        target,
+    )
+    written = verify_mod.write_verified(target, verdicts)
+    manifest = verify_mod.build_manifest(config, target, verdicts, sources={"roots": roots, "unavailable": unavailable}, scan=scan)
+    path = verify_mod.write_manifest(config, target, manifest)
+    sys.stdout.write(serialize.dumps_json(manifest))
+    _write_report(args.out_dir, "run.json", manifest)
+    counts = verify_mod.summarize(verdicts)
+    sys.stderr.write(
+        "run: 读入 {} 个会话（跳过 {}，失败 {}）→ {} 条结论（verified {}，unverified {}，needs_manual {}），"
+        "写出 {} 个测试 → {}\n".format(
+            len(scan.files), len(scan.skipped), len(scan.failed), counts["entries"],
+            counts["verified"], counts["unverified"], counts["needs_manual"], counts["written"], path,
+        )
+    )
+    return EXIT_OK if counts["verified"] else EXIT_CHECK_FAILED
+
+
+def require_pytest() -> None:
+    """依赖门：缺 pytest 就是缺运行依赖（exit 3），绝不退化成"零条结果 + exit 0"。"""
+    if not pytest_available():
+        raise DependencyMissing(
+            "pytest 不可用：RED/GREEN 验证无法进行（不得退化成零结果 + exit 0）",
+            hint="装上 pytest（dev extras 里有）后重试",
+        )
+
+
+def _resolve_run_roots(args: argparse.Namespace) -> Tuple[Dict[str, str], List[str]]:
+    """展开两个 harness 的日志根：显式参数 → 环境变量 → 常见位置；定位不到的**逐条记原因**。"""
+    resolved: Dict[str, str] = {}
+    unavailable: List[str] = []
+    for source in events.SOURCES:
+        explicit = args.claude_root if source == "claude" else args.codex_root
+        try:
+            resolved[source] = str(paths_mod.discover_root(source, explicit=explicit))
+        except InputUnavailable as exc:
+            unavailable.append(str(exc.message))
+    return resolved, unavailable
+
+
+def _write_report(out_dir: Optional[str], name: str, report: Mapping[str, Any]) -> Optional[Path]:
+    """可选：把同一份机读报告另存到 `--out-dir`（中间产物落点，写盘只经 `serialize`）。"""
+    if not out_dir:
+        return None
+    target = Path(out_dir)
+    target.mkdir(parents=True, exist_ok=True)
+    return serialize.write_json_atomic(target / name, dict(report))
+
+
 def cmd_bench(args: argparse.Namespace) -> int:
     """M1：合成语料基准对账（双边门 + 逐样本点名；`--check` 只做再生成位级一致校验）。
 
     退出码：0 = 达标（或探活模式下"缺陷被检出"）；1 = 未达标（或探活模式下"缺陷没被检出"）；
-    2 = 用法/输入不可用。
+    2 = 用法/输入不可用；3 = 缺 pytest（`red_green` 事实面要真跑测试）。
     """
     config = config_mod.load_config(args.config)
     limits = readers.limits_from_config(config)
@@ -284,10 +396,6 @@ def _render_value(value: Any) -> str:
 # --------------------------------------------------------------------------- #
 # 自检子检查
 # --------------------------------------------------------------------------- #
-
-
-def pytest_available() -> bool:
-    return importlib.util.find_spec("pytest") is not None
 
 
 def _check_config_copies(config_path: Path) -> Check:
@@ -378,21 +486,6 @@ def _check_format_fingerprints() -> Check:
 
 
 # --------------------------------------------------------------------------- #
-# 未交付命令
-# --------------------------------------------------------------------------- #
-
-
-def _make_staged_handler(command: str):
-    milestone = STAGED_COMMANDS[command]
-
-    def handler(args: argparse.Namespace) -> int:  # noqa: ARG001 - 契约占位，参数由里程碑消费
-        raise StageNotReady(command=PROG + " " + command, milestone=milestone, version=__version__)
-
-    handler.__name__ = "cmd_staged_" + command
-    return handler
-
-
-# --------------------------------------------------------------------------- #
 # 参数面
 # --------------------------------------------------------------------------- #
 
@@ -468,20 +561,20 @@ def build_parser() -> argparse.ArgumentParser:
     add_config_arg(generate)
     generate.set_defaults(handler=cmd_generate)
 
-    verify = sub.add_parser("verify", help="M5：RED/GREEN 双验证（隔离副本内）")
-    verify.add_argument("episode", metavar="EPISODE_ID", help="episode_id")
-    verify.add_argument("--repo", metavar="DIR", default=None, help="目标仓库根")
+    verify = sub.add_parser("verify", help="M5：单 episode 的 RED/GREEN 隔离验证（只写测试目录）")
+    verify.add_argument("episode", metavar="EPISODE_REF", help="episode 引用：<会话引用>#<首次修复事件序号>（同 generate）")
+    verify.add_argument("--repo", metavar="DIR", default=None, help="目标仓库根（隔离副本的来源；验证绝不改它的工作区）")
     verify.add_argument("--timeout", type=int, default=None, metavar="SECONDS", help="单例超时（缺省取口径文件，代码内不留默认数值）")
-    verify.add_argument("--out-dir", metavar="DIR", default=None, help="中间产物落点")
+    verify.add_argument("--out-dir", metavar="DIR", default=None, help="机读报告落点目录（可选，写 verify.json）")
     add_config_arg(verify)
-    verify.set_defaults(handler=_make_staged_handler("verify"))
+    verify.set_defaults(handler=cmd_verify)
 
-    run = sub.add_parser("run", help="M5：全链路一条命令（读取 → 切分 → 还原 → 生成 → 验证 → manifest）")
+    run = sub.add_parser("run", help="M5：全链路（读取 → 切分 → 还原 → 生成 → 验证 → manifest）")
     run.add_argument("--target", metavar="DIR", required=True, help="目标仓库根（测试与 manifest 落点）")
     add_source_args(run)
-    run.add_argument("--out-dir", metavar="DIR", default=None, help="中间产物落点")
+    run.add_argument("--out-dir", metavar="DIR", default=None, help="机读报告落点目录（可选，写 run.json）")
     add_config_arg(run)
-    run.set_defaults(handler=_make_staged_handler("run"))
+    run.set_defaults(handler=cmd_run)
 
     return parser
 

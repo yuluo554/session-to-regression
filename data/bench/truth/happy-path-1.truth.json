@@ -66,6 +66,15 @@
       "status": "ok"
     }
   ],
+  "expect_red_green": [
+    {
+      "episode_id": "sess-demo-0001#5",
+      "green_exit": 1,
+      "reason": "red_not_failed",
+      "red_exit": 0,
+      "status": "unverified"
+    }
+  ],
   "input_file": "codex/happy-path-1.jsonl",
   "sample": "happy-path-1",
   "session_id": "sess-demo-0001"

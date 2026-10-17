@@ -51,6 +51,15 @@
       "status": "no_before_image"
     }
   ],
+  "expect_red_green": [
+    {
+      "episode_id": "sess-demo-0007#4",
+      "green_exit": null,
+      "reason": "reconstruction_not_usable:no_before_image",
+      "red_exit": null,
+      "status": "needs_manual"
+    }
+  ],
   "input_file": "claude/new-file-write-1.jsonl",
   "sample": "new-file-write-1",
   "session_id": "sess-demo-0007"

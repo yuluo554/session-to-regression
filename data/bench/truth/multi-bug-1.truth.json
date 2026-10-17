@@ -78,6 +78,22 @@
       "status": "ok"
     }
   ],
+  "expect_red_green": [
+    {
+      "episode_id": "sess-demo-0003#4",
+      "green_exit": 0,
+      "reason": "",
+      "red_exit": 1,
+      "status": "verified"
+    },
+    {
+      "episode_id": "sess-demo-0003#9",
+      "green_exit": 1,
+      "reason": "red_not_failed",
+      "red_exit": 0,
+      "status": "unverified"
+    }
+  ],
   "input_file": "claude/multi-bug-1.jsonl",
   "sample": "multi-bug-1",
   "session_id": "sess-demo-0003"

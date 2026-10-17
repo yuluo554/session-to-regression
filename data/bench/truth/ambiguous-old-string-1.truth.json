@@ -51,6 +51,15 @@
       "status": "unresolved"
     }
   ],
+  "expect_red_green": [
+    {
+      "episode_id": "sess-demo-0006#4",
+      "green_exit": null,
+      "reason": "reconstruction_not_usable:unresolved",
+      "red_exit": null,
+      "status": "needs_manual"
+    }
+  ],
   "input_file": "claude/ambiguous-old-string-1.jsonl",
   "sample": "ambiguous-old-string-1",
   "session_id": "sess-demo-0006"

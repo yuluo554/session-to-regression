@@ -47,6 +47,7 @@
       "status": "ok"
     }
   ],
+  "expect_red_green": [],
   "input_file": "claude/doc-only-1.jsonl",
   "sample": "doc-only-1",
   "session_id": "sess-demo-0005"

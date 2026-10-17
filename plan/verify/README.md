@@ -360,3 +360,75 @@ git 若在克隆时归一了字节，`s2r bench` 的台账门会当场红。这�
 | `py -3.8 -X utf8 tools/fix_eol.py --check` | 0 | ✅ 符合：88 个文件 0 问题 |
 | `PYTHONPATH=src py -3.12 -X utf8 -m s2r selftest` | 0 | ✅ 符合：口径文件在 clone 内定位成功、自检项全 ok |
 | 逐文件字节扫描 `\r\n`（93 个文本文件） | 0 | ✅ 符合：仅 `.pytest_cache/**` 带 CRLF（pytest 自身缓存产物，EOL 门已按跳过规则排除——门报的是"扫描面 0 问题"，与"树里一个 CR 字节都没有"不是同一命题） |
+
+---
+
+## M5（2026-10-17）RED/GREEN 隔离验证 + manifest + 交付收尾
+
+### 1. 逐条命令与退出码语义（本机实跑）
+
+| # | 命令 | 退出码 | 语义判定 |
+|---|---|---|---|
+| 1 | `py -3.8 -X utf8 -m pytest -q` | 0 | ✅ 符合：**348 项通过**（M4 时 294） |
+| 2 | `py -3.12 -X utf8 -m pytest -q` | 0 | ✅ 符合：**348 项通过**（同收集数） |
+| 3 | `s2r verify "data/bench/claude/structured-patch-1.jsonl#4" --repo <临时目标仓库>` | 0 | ✅ 符合：1 条结论 `verified`（RED 退出码 1 / GREEN 0），落 `tests/regression/test_sess_demo_0009_4.py`；目标仓库源码逐字节不变 |
+| 4 | `s2r verify "…multi-bug-1.jsonl#9" --repo <同上>` | 1 | ✅ 符合：`unverified` + `red_not_failed`（骨架没有活动断言 → 修复前那次跑"通过"），**不落盘** |
+| 5 | `s2r verify "…ambiguous-old-string-1.jsonl#4"`（不给 `--repo`） | 1 | ✅ 符合：`needs_manual` + `reconstruction_not_usable:unresolved`，两次退出码为 `null`（**没跑**就不填） |
+| 6 | `s2r verify <ref>`（有内容可跑却不给 `--repo`） | 2 | ✅ 符合：`usage_error` + "验证要在它的**隔离副本**里跑" |
+| 7 | `s2r verify "…multi-bug-1.jsonl#77"` | 2 | ✅ 符合：`input_unavailable` + **列出可用序号** |
+| 8 | `s2r verify <ref>`（import 桩把 `pytest_available` 换成 False） | 3 | ✅ 符合：`dependency_missing`，stdout 为空（不产半截产物） |
+| 9 | `s2r run --target <临时目标仓库> --claude-root data/bench/claude --codex-root data/bench/codex` | 0 | ✅ 符合：读入 9 个会话 → 8 条结论（verified 2 / unverified 1 / needs_manual 5），写出 2 个测试 + `regression/manifest.json`；**测试目录内容与 verified 条目一一对应** |
+| 10 | `s2r run --target <空目录> …` | 1 | ✅ 符合：全部 `unverified`(环境不可用)/`needs_manual`，manifest 照写、**不产测试文件** |
+| 11 | `s2r run --target <dir> --claude-root <不存在> --codex-root <不存在>` | 2 | ✅ 符合：`input_unavailable`（两个日志根都定位不到） |
+| 12 | `s2r run` / `s2r verify`（import 桩缺 pytest） | 3 | ✅ 符合：`dependency_missing`（与 selftest 的依赖语义同一判据） |
+| 13 | `python tools/ci_smoke.py`（已装包环境） | 0 | ✅ 符合：**20/20**（`verify`/`run` 已按真实语义登记 0，bare + module 两形态；新增 `%TMP_SEED:` 种子临时目录，仓库工作区零新增文件） |
+| 14 | `s2r bench` | 0 | ✅ 符合：`ok`（检出 **10/10**、误报 0）；`pending_facts` 为**空表**；验证层逐 episode 对账（含 RED/GREEN 退出码） |
+| 15 | `s2r bench --probe <9 个探活>` | 0 ×9 | ✅ 符合：九个注入缺陷全部被检出（新增 `fold-unverified`：把 `unverified` 折叠成 `verified`） |
+| 16 | `python tools/gen_bench.py --check` | 0 | ✅ 符合：语料/真值/磁盘夹具再生成**逐字节一致**（10 样本，rng_draws=5） |
+| 17 | `python tools/fix_eol.py --check` | 0 | ✅ 符合：98 个文件 0 问题 |
+| 18 | `s2r --version`（双解释器） | 0 | ✅ 符合：`s2r 0.1.0.dev0 (python 3.8.8)` / `(python 3.12.10)`，与 `pyproject` 的动态版本（`s2r.__version__`）一致 |
+
+### 2. 变异验证（M1–M4 的 15 项复核 + M5 新增 4 项，共 19 项全红）
+
+跑批脚本在仓库树外（`%TEMP%/s2r-mutations/mutate_m5.py`：备份 → 改 → **先确认五个模块仍可导入** →
+跑 → 还原）。M5 四项（HANDOFF-M5 §二.5 要求）：
+
+| 变异 | 目标判据 | 结果 |
+|---|---|---|
+| N9 隔离失效：验证直接写回用户仓库 | `test_verified_episode_gets_written_and_the_target_source_is_untouched`（源码树哈希 + 副本内无 pytest 缓存）、CLI 侧"未通过项不改动仓库" | RED ✅ |
+| N10 "不验证不落盘"被折叠：`unverified`/`needs_manual` 也落正式目录 | 目录内容断言（测试目录 ↔ verified 条目一一对应） | RED ✅ |
+| N11 RED 判据恒真（修复前没失败也算通过） | `test_red_not_failed_is_reported_…` + 基准（真值声明 `unverified`） | RED ✅ |
+| N12 缺 pytest 时退化成照跑（两处依赖门整段失效） | `test_missing_pytest_is_a_dependency_error` + CLI exit 3 | RED ✅ |
+
+M1–M7（还原优先级 / 不任选 / K14 非空 / 探活假门 / 对账映射 / `--repo` 显式 / hunk 不任选）、
+N1–N8（模板空转 / 候选断言不落骨架 / 探活假门 / 生成对账映射 / 拿 after 当 before / 约定探测静默 /
+落点越界 / 锚点缺失）**逐项复核仍全红**——本轮的改动没有把老门改松。
+
+### 3. 与 CI 的缺口（诚实标注）
+
+* **GitHub Actions 仍未运行**（未建远端）→ CI 结论一律"本地等价校验，未接远端，CI 待首推验证"。
+* 本轮新增等价物：双解释器 348 项、九探活、验证层逐 episode 对账（含 RED/GREEN 退出码，10 样本全覆盖）、
+  `verify`/`run` 的 bare/module 离线冒烟（目标仓库用种子临时目录）、四类 `unverified` 原因各一条、
+  未通过项不落盘的目录内容断言、19 项变异验证、schema/枚举/计数三重 manifest 测试。
+* **新增缺口（本机测不了，显式待首推验证）**：① `ci_smoke` 的 `%TMP_SEED:` 占位符在 Linux 腿上的
+  临时目录形态（与 `%TMP%` 同源，风险低）；② `subprocess` 超时在 Linux 上的进程回收行为
+  （本机 Windows 实测 timeout 路径正常）；③ 隔离副本 `copytree` 在大仓库上的耗时（本机夹具极小）。
+
+### 4. 安装面 / 断网 / 真实日志只读抽验（本机实跑）
+
+| 项 | 命令 | 结果 |
+|---|---|---|
+| 非 editable 安装 + 中立 CWD | `pip install --no-build-isolation --no-deps .` → 在中立目录跑 `s2r selftest` / `s2r config path` | ✅ 口径文件解析到 `site-packages/s2r/resources/scoring.toml`，自检 6 项全 ok（安装面第五面成立）。本机 venv 缺 `setuptools`（pip 25 不再自带）已按镜像补装——**这是环境前提，不是包缺陷**；复核后已恢复 editable 装 |
+| **断网运行**（零上传的动态证明） | 仓库树外探针先把 `socket.socket` / `create_connection` / `getaddrinfo` 换成抛异常的桩，再跑全链路 `run` | ✅ **exit 0**：9 会话 → 8 条结论（verified 2 / unverified 1 / needs_manual 5），写出 2 个测试 + manifest——工具自身没有任何网络通路 |
+| 真实日志只读抽验（验证层聚合读数） | 按体积取最大若干份（Claude 40 / Codex 20，跳过 >20 MB），逐份 `plans_of_session(repo=None)` → `unreachable_verdicts`；只打印聚合计数 | ✅ Claude：读入 40 份 → 7 个 episode，生成层 7 个 `needs_manual`（`not_python` 4 / `reconstruction_not_usable` 3）；Codex：20 份 → 8 个 episode，全部 `needs_manual`（`reconstruction_not_usable` 8） |
+
+**这三行读数怎么解读（写清楚，别包装成"效果很好"）**：
+
+* 真实日志上、**不给 `--repo`** 时，M5 的验证层一条都进不去：生成层拿不到"修改前全文"就没有骨架内容，
+  没有内容就没有可跑的东西 → 逐条 `needs_manual`（两次退出码为 `null`）。这与 M3/M4 的结论同源，
+  **是如实降级，不是缺陷**；
+* 真实会话的"修改前全文"要么来自 Claude 的 `originalFile`（本机抽验里占比不高），要么来自
+  `--repo` 指向的**该编辑发生前的磁盘状态**——后者是用户自己的决定（隐私面设计），
+  所以真实语料上的 RED/GREEN 结论**必须由用户在目标仓库上给出**，本机无法代跑；
+* 合成基准因此是**唯一能给"红绿通过率"背书的地方**：10 个样本里逐 episode 声明并核对了
+  RED/GREEN 退出码（真跑，不是声明），见 §1 第 14/15 行。

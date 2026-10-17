@@ -61,6 +61,15 @@
       "status": "ok"
     }
   ],
+  "expect_red_green": [
+    {
+      "episode_id": "sess-demo-0009#4",
+      "green_exit": 0,
+      "reason": "",
+      "red_exit": 1,
+      "status": "verified"
+    }
+  ],
   "input_file": "claude/structured-patch-1.jsonl",
   "sample": "structured-patch-1",
   "session_id": "sess-demo-0009"

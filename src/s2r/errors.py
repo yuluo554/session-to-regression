@@ -9,8 +9,11 @@
 1       未达标：无 verified（含全部 unverified）、基准未达标、selftest 自检失败
 2       用法错误或输入不可用：未知子命令、参数错误、路径不存在、未知日志格式
 3       运行依赖缺失（如 pytest 不可用）——不得退化为「零条结果 + exit 0」
-4       阶段未就绪：该子命令所属模块尚未交付（骨架期占用，随里程碑整项退役）
 ======  ================================================================
+
+> 历史：骨架期曾占用 **4 = 阶段未就绪**（未交付命令不产结果）。M5 之后五条子命令全部交付，
+> 该语义**整项退役**（`cli` 命令表 / `tools/ci_smoke.py` / README 退出码表 / `plan/04·06`
+> 四处同一次提交同步）——留着它就是让"幽灵语义"复活。
 
 所有领域异常都继承 ``ValueError``：CLI 那条 ``except`` 抓得住，不会逃逸成未捕获的 traceback
 （「输入有问题，退出码 2」与「程序崩了」是两种用户可见结果）。
@@ -24,10 +27,9 @@ EXIT_OK = 0
 EXIT_CHECK_FAILED = 1
 EXIT_USAGE = 2
 EXIT_DEPENDENCY_MISSING = 3
-EXIT_STAGE_NOT_READY = 4
 
 #: 允许出现的退出码全集；README 的退出码表必须逐条覆盖（守门测试锁死）。
-EXIT_CODES = (EXIT_OK, EXIT_CHECK_FAILED, EXIT_USAGE, EXIT_DEPENDENCY_MISSING, EXIT_STAGE_NOT_READY)
+EXIT_CODES = (EXIT_OK, EXIT_CHECK_FAILED, EXIT_USAGE, EXIT_DEPENDENCY_MISSING)
 
 
 class S2RError(ValueError):
@@ -89,21 +91,6 @@ class DependencyMissing(S2RError):
 
     code = "dependency_missing"
     exit_code = EXIT_DEPENDENCY_MISSING
-
-
-class StageNotReady(S2RError):
-    """阶段未就绪：子命令已进 CLI 契约，但实现尚未交付（不伪造空结果）。"""
-
-    code = "stage_not_ready"
-    exit_code = EXIT_STAGE_NOT_READY
-
-    def __init__(self, command: str, milestone: str, version: str) -> None:
-        super().__init__(
-            "{} 尚未交付（骨架版本 {}），不产出任何结果".format(command, version),
-            hint="该子命令属于 {}，将在该里程碑实现并退役本退出码".format(milestone),
-        )
-        self.command = command
-        self.milestone = milestone
 
 
 class NotASessionLog(S2RError):

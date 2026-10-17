@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -37,14 +38,17 @@ from s2r import cli, errors, stdio  # noqa: E402  （需要先补 sys.path）
 BARE = "bare"
 MODULE = "module"
 
-#: 临时目录占位符：需要产物落点的命令（如 `generate`）用它——冒烟**不许往仓库里写文件**
+#: 临时目录占位符：需要产物落点的命令（如 `generate`/`verify`/`run`）用它——冒烟**不许往仓库里写文件**
 #: （K11：只写测试目录；写进本仓库会污染工作区、还会被 EOL/脱敏门扫到）。
 TMP_TOKEN = "%TMP%"
 
+#: 「带种子的临时目录」占位符：`%TMP_SEED:<仓库内相对目录>%` —— 现开临时目录并把该目录拷进去，
+#: 把**拷贝后的那层**当作命令的目标仓库。为什么需要：`run`/`verify` 要在"编辑前的工作区"里跑
+#: RED/GREEN（没有源文件就无从验证），而真实仓库不能作为落点（生成物会写进仓库）。
+TMP_SEED_PATTERN = re.compile(r"^%TMP_SEED:([^%]+)%$")
+
 #: 每个子命令的冒烟调用形态（covers = 被覆盖的子命令或 --version；form = 调用形态）。
-#: 期望退出码**自动推导**：仍在「阶段未就绪」表里的命令 = 4；已交付的必须在此登记真实期望值。
-#: 里程碑落地时：把命令从 `cli.STAGED_COMMANDS` 摘除 → 这里必须补一条 DELIVERED_EXPECT，
-#: 并且**在同一次提交里**退役 README 退出码表里对应的旧语义。
+#: 期望退出码来自 DELIVERED_EXPECT（缺一条即 KeyError，逼你更新冒烟）。
 INVOCATIONS = {
     # 用**目录**而不是某个具体样本：语料文件名由确定性 RNG 在两种 harness 间选型，
     # 写死文件名会在某次重生成后失效（首版实测：指向 claude/happy-path-1.jsonl，
@@ -58,11 +62,14 @@ INVOCATIONS = {
     # 序号取该会话里**首个**修复事件的源行号（语料冻结 → 序号也冻结）。
     # 落点用 %TMP%：生成物必须写到测试目录，**不许写进本仓库**（K11），故由 run_one 现开临时目录。
     "generate": ["data/bench/claude/multi-bug-1.jsonl#4", "--out-dir", TMP_TOKEN],
-    "verify": ["sess-demo-0001#1"],
-    "run": ["--target", "demo-target"],
+    # verify 的目标仓库用"带种子的临时目录"：隔离副本要在**有源文件**的仓库里跑才谈得上 RED/GREEN，
+    # 而生成物（verified 的测试）必须落在仓库外——种子目录同时满足这两条。
+    "verify": ["data/bench/claude/structured-patch-1.jsonl#4", "--repo", "%TMP_SEED:data/bench/repo/structured-patch-1%"],
+    # run 的全链路：日志根指向**合成语料**（本机没有真实日志也能跑），目标仓库用种子临时目录。
+    "run": ["--target", "%TMP_SEED:data/bench/repo/multi-bug-1%", "--claude-root", "data/bench/claude", "--codex-root", "data/bench/codex"],
 }
 
-#: 已交付命令的真实期望退出码（未交付的走 STAGED_COMMANDS → 4，由 build_smoke 推导）
+#: 已交付命令的真实期望退出码（五条业务命令全在表里；缺一条 `expected_exit` 会当场 KeyError）
 DELIVERED_EXPECT = {
     "scan": errors.EXIT_OK,
     "bench": errors.EXIT_OK,
@@ -70,6 +77,10 @@ DELIVERED_EXPECT = {
     # multi-bug-1 的第一个 episode 走 ①/② 路径（before 全文可得），diff 是"加守卫"形态
     # → 能推出候选断言 → 至少一份骨架 = 0；推不出来时会是 1（那时才该来改这条登记）。
     "generate": errors.EXIT_OK,
+    # structured-patch-1 的候选断言可证伪（修复前 ZeroDivisionError / 修复后返回 0）→ verified ≥ 1
+    "verify": errors.EXIT_OK,
+    # 目标仓库里 `demo/alpha/src/calc.py` 在位 → 至少一条 verified（其余如实 unverified/needs_manual）
+    "run": errors.EXIT_OK,
 }
 
 
@@ -81,15 +92,13 @@ class Smoke(NamedTuple):
     note: str
 
 
-def _staged_argv(command: str, form: str) -> Sequence[str]:
+def argv_for(command: str, form: str) -> Sequence[str]:
     head = ["s2r", command] if form == BARE else [sys.executable, "-m", "s2r", command]
     return list(head) + list(INVOCATIONS[command])
 
 
 def expected_exit(command: str) -> int:
-    """期望退出码：未交付 → 阶段未就绪；已交付 → 必须显式登记（否则 KeyError，逼你更新冒烟）。"""
-    if command in cli.STAGED_COMMANDS:
-        return errors.EXIT_STAGE_NOT_READY
+    """期望退出码：必须显式登记（否则 KeyError，逼你在里程碑落地时更新冒烟）。"""
     return DELIVERED_EXPECT[command]
 
 
@@ -102,23 +111,47 @@ def build_smoke() -> List[Smoke]:
         rows.append(Smoke("config", form, head + ["config", "show", "--json"], errors.EXIT_OK, "口径文件机读输出"))
         rows.append(Smoke("config", form, head + ["config", "path"], errors.EXIT_OK, "口径文件定位"))
     for command in sorted(INVOCATIONS):
-        staged = command in cli.STAGED_COMMANDS
-        note = "阶段未就绪（{}）".format(cli.STAGED_COMMANDS[command]) if staged else "已交付"
         for form in (BARE, MODULE):
-            rows.append(Smoke(command, form, _staged_argv(command, form), expected_exit(command), note))
+            rows.append(Smoke(command, form, argv_for(command, form), expected_exit(command), "已交付"))
     return rows
 
 
-def run_one(row: Smoke, cwd: Path) -> Tuple[bool, int, str]:
-    """跑一条冒烟；返回 (是否符合预期, 实际退出码, 输出摘要)。
+def materialize(argv: Sequence[str], created: List[str]) -> Tuple[List[str], Optional[str]]:
+    """把占位符换成真实临时目录；返回 (argv, 错误说明)。
 
-    含 `%TMP%` 的 argv 现开一个临时目录替换（用完即删）——产物落点必须与仓库隔离。
+    * ``%TMP%`` → 现开一个空临时目录；
+    * ``%TMP_SEED:<rel>%`` → 现开临时目录，并把仓库内的 ``<rel>`` 拷进去（目标仓库 = 拷贝后的那层）。
     """
-    argv = list(row.argv)
-    tmp_dir: Optional[str] = None
-    if TMP_TOKEN in argv:
-        tmp_dir = tempfile.mkdtemp(prefix="s2r-smoke-")
-        argv = [tmp_dir if item == TMP_TOKEN else item for item in argv]
+    out: List[str] = []
+    for item in argv:
+        if item == TMP_TOKEN:
+            path = tempfile.mkdtemp(prefix="s2r-smoke-")
+            created.append(path)
+            out.append(path)
+            continue
+        match = TMP_SEED_PATTERN.match(item)
+        if not match:
+            out.append(item)
+            continue
+        source = REPO_ROOT.joinpath(*match.group(1).split("/"))
+        if not source.is_dir():
+            return out, "冒烟种子目录不存在: {}".format(source)
+        holder = tempfile.mkdtemp(prefix="s2r-smoke-seed-")
+        created.append(holder)
+        seeded = Path(holder) / source.name
+        shutil.copytree(str(source), str(seeded))
+        out.append(str(seeded))
+    return out, None
+
+
+def run_one(row: Smoke, cwd: Path) -> Tuple[bool, int, str]:
+    """跑一条冒烟；返回 (是否符合预期, 实际退出码, 输出摘要)。"""
+    created: List[str] = []
+    argv, problem = materialize(row.argv, created)
+    if problem is not None:
+        for path in created:
+            shutil.rmtree(path, ignore_errors=True)
+        return False, -1, problem
     env = dict(os.environ)
     env["PYTHONUTF8"] = "1"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -138,8 +171,8 @@ def run_one(row: Smoke, cwd: Path) -> Tuple[bool, int, str]:
     except subprocess.TimeoutExpired:
         return False, -2, "超时"
     finally:
-        if tmp_dir is not None:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
+        for path in created:
+            shutil.rmtree(path, ignore_errors=True)
     output = (proc.stdout or "").replace("\r\n", "\n").strip()
     tail = " | ".join(line for line in output.split("\n") if line)[-200:]
     return proc.returncode == row.expect_exit, proc.returncode, tail
@@ -158,6 +191,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return errors.EXIT_DEPENDENCY_MISSING
 
     cwd = Path(args.cwd)
+    # 脚本自己也数一遍覆盖面：新增子命令却忘了补冒烟 → 这里当场报出来（不是靠人眼）
+    registered = set(cli.registered_commands()) - {"selftest", "config"}
+    missing = sorted(registered - set(INVOCATIONS))
+    if missing:
+        sys.stderr.write("check_failed: 冒烟表缺命令: {}\n".format(", ".join(missing)))
+        return errors.EXIT_CHECK_FAILED
     rows = build_smoke()
     failures = 0
     sys.stdout.write("console script: {}\n".format(console_script))
