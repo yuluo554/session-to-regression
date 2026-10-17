@@ -233,3 +233,17 @@
 * **新增缺口（本机测不了，显式待首推验证）**：① `data/bench/repo/**` 里的夹具文件名在大小写不敏感
   文件系统（macOS/Windows）与敏感文件系统（Linux）上的行为差异；② Windows 盘符形态的磁盘候选路径
   只在 Windows 腿上有意义（Linux 腿上走 POSIX 分支）。
+
+### 4. 干净 clone 复核（M3，仓库树外，`--no-local`）
+
+判据重点：**新语料的台账 sha256（含 `data/bench/repo/**` 磁盘基线夹具）在克隆后是否仍然一致**——
+git 若在克隆时归一了字节，`s2r bench` 的台账门会当场红。这条因此是"`-text` 冻结生效"的端到端证明。
+
+| 命令（clone 目录内） | 退出码 | 语义判定 |
+|---|---|---|
+| `PYTHONPATH=src py -3.8 -X utf8 -m s2r bench` | 0 | ✅ 符合：`ok`（10/10、误报 0）——**台账 sha256 与克隆字节一致 = `-text` 冻结生效**（含磁盘基线夹具） |
+| `py -3.8 -X utf8 tools/gen_bench.py --check` | 0 | ✅ 符合：语料/真值/夹具再生成逐字节一致（10 样本，rng_draws=5） |
+| `py -3.8 -X utf8 -m pytest -q` | 0 | ✅ 符合：**243 项通过**（与作者机器同收集数） |
+| `py -3.8 -X utf8 tools/fix_eol.py --check` | 0 | ✅ 符合：84 个文件 0 问题 |
+| `PYTHONPATH=src py -3.12 -X utf8 -m s2r selftest` | 0 | ✅ 符合：口径文件在 clone 内定位成功、6 项自检 ok |
+| 逐文件字节扫描 `\r\n`（82 个文本文件） | 0 | ✅ 符合：仅 `.pytest_cache/README.md` 带 CRLF（pytest 自身缓存产物，EOL 门已按跳过规则排除，与"树里一个 CR 字节都没有"不是同一命题） |
