@@ -432,3 +432,21 @@ N1–N8（模板空转 / 候选断言不落骨架 / 探活假门 / 生成对账�
   所以真实语料上的 RED/GREEN 结论**必须由用户在目标仓库上给出**，本机无法代跑；
 * 合成基准因此是**唯一能给"红绿通过率"背书的地方**：10 个样本里逐 episode 声明并核对了
   RED/GREEN 退出码（真跑，不是声明），见 §1 第 14/15 行。
+
+### 5. 干净 clone 复核（M5，仓库树外，`--no-local`）
+
+判据重点：本轮 `data/bench/**` **又重生成了一次**（真值新增 `expect_red_green`，并为"有内容可验证"的
+样本补了磁盘基线夹具）——若 git 在克隆时归一了字节，`s2r bench` 的台账门会当场红；而
+`red_green` 事实面要在目标仓库里真跑 pytest，所以"clone 里 `run` 能给出 verified"同时证明
+**冻结字节 + 新夹具 + 新命令**三件事在新克隆里都成立。
+
+| 命令（clone 目录内） | 退出码 | 语义判定 |
+|---|---|---|
+| `py -3.8 -X utf8 tools/gen_bench.py --check` | 0 | ✅ 符合：语料/真值/磁盘夹具再生成**逐字节一致**（10 样本，rng_draws=5） |
+| `PYTHONPATH=src py -3.8 -X utf8 -m s2r bench` | 0 | ✅ 符合：`ok`（10/10、误报 0）——**台账 sha256 与克隆后字节一致 = `-text` 冻结生效**（含新增夹具与验证层真值） |
+| `py -3.8 -X utf8 -m pytest -q` | 0 | ✅ 符合：**348 项通过**（与作者机器同收集数） |
+| `PYTHONPATH=src py -3.8 -X utf8 -m s2r run --target <树外种子目录> --claude-root data/bench/claude --codex-root data/bench/codex` | 0 | ✅ 符合：9 会话 → 8 条结论（verified 2 / unverified 1 / needs_manual 5），写出 2 个测试 + manifest；产物全在树外，clone 内 `git status` 干净 |
+| `PYTHONPATH=src py -3.8 -X utf8 -m s2r verify "data/bench/claude/structured-patch-1.jsonl#4" --repo <同一树外目录>` | 0 | ✅ 符合：**新交付命令**在克隆里直接可用（RED 1 / GREEN 0，写出 1 个测试） |
+| `py -3.8 -X utf8 tools/fix_eol.py --check` | 0 | ✅ 符合：99 个文件 0 问题 |
+| `PYTHONPATH=src py -3.12 -X utf8 -m s2r selftest` | 0 | ✅ 符合：口径文件在 clone 内定位成功、自检项全 ok |
+| 逐文件字节扫描 `\r\n`（99 个文本文件） | 0 | ✅ 符合：**零命中**（本轮连 `.pytest_cache` 都还没生成——`--force` 重生成与提交都保持了 LF） |
