@@ -30,6 +30,31 @@
   ],
   "expect_episodes": 1,
   "expect_filter_reasons": [],
+  "expect_generated": {
+    "anchor_fragments": [
+      "sess-demo-0001",
+      "/demo/beta/pkg/format.py",
+      "drops the sign"
+    ],
+    "assumed_convention": true,
+    "candidate_count": 0,
+    "generated_count": 0,
+    "reasons": [
+      "assert_not_derivable"
+    ],
+    "sections": [
+      "act",
+      "arrange",
+      "assert"
+    ],
+    "statuses": [
+      "needs_manual"
+    ],
+    "symbols": [
+      "format_amount"
+    ],
+    "written_count": 1
+  },
   "expect_reconstructions": [
     {
       "after": "def format_amount(value):\n    return abs(value)\n",

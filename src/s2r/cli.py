@@ -11,7 +11,7 @@
 ``s2r scan``                    M1 双 harness 读取器 + 事件流
 ``s2r bench``                   M1 合成会话基准（植入真值）
 ``s2r reconstruct``             M3 差分还原器
-``s2r generate``                M4 pytest 骨架生成器
+``s2r generate``                M4 pytest 骨架生成器（模板 + AST，零模型）
 ``s2r verify`` / ``s2r run``    M5 RED/GREEN 验证 + manifest
 ==============================  ==============================================
 
@@ -29,7 +29,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
-from . import __version__, bench as bench_mod, benchdata, config as config_mod, events, paths as paths_mod, readers, reconstruct as reconstruct_mod, serialize, stdio
+from . import __version__, bench as bench_mod, benchdata, config as config_mod, events, generate as generate_mod, paths as paths_mod, readers, reconstruct as reconstruct_mod, serialize, stdio
 from .errors import (EXIT_CHECK_FAILED, EXIT_DEPENDENCY_MISSING, EXIT_OK, EXIT_STAGE_NOT_READY, EXIT_USAGE,
                      InputUnavailable, S2RError, StageNotReady, UsageError)
 
@@ -37,7 +37,6 @@ PROG = "s2r"
 
 #: 尚未交付的子命令 → 所属里程碑（里程碑落地时整项摘除，并同步 tools/ci_smoke.py、README、plan）
 STAGED_COMMANDS: Dict[str, str] = {
-    "generate": "M4",
     "verify": "M5",
     "run": "M5",
 }
@@ -205,6 +204,39 @@ def cmd_reconstruct(args: argparse.Namespace) -> int:
     else:
         sys.stdout.write(result.to_json())
     return EXIT_OK if result.ok_files else EXIT_CHECK_FAILED
+
+
+def cmd_generate(args: argparse.Namespace) -> int:
+    """M4：把一个 episode 的还原产物生成 pytest 回归骨架（模板 + AST，零模型）。
+
+    落点：`--repo`（目标仓库根，生成物进其 `[generate].tests_dir`）或 `--out-dir`（隔离输出根，
+    目录形态与目标仓库一致）——两者都不给就报用法错误（**绝不猜"要不要写进当前目录"**）。
+
+    退出码：0 = 至少生成一份**含候选断言**的骨架；1 = 一份都没有（目标符号识别不到、签名读不出
+    最小调用、diff 推不出候选断言、还原状态不是 `ok`）——显式降级，不伪装成功；2 = 用法/输入不可用。
+    """
+    config = config_mod.load_config(args.config)
+    limits = readers.limits_from_config(config)
+    out_root = args.out_dir if args.out_dir else args.repo
+    if args.out_dir:  # 显式输出根：按需创建（它是产物落点，不是输入面）
+        Path(args.out_dir).mkdir(parents=True, exist_ok=True)
+    session_ref, fix_seq = generate_mod.parse_episode_ref(args.episode)
+    session_path = reconstruct_mod.resolve_session_file(session_ref, limits, roots=None)
+    file_read = reconstruct_mod.load_session(session_path, limits)
+    result = generate_mod.generate_episode(
+        file_read, config, fix_seq, repo=args.repo, out_root=out_root
+    )
+    counts = result.counts()
+    sys.stdout.write(result.to_json())
+    sys.stderr.write(
+        "generate: {}/{} → {} 个骨架（生成 {}，需人工 {}），写出 {} 个文件{}\n".format(
+            result.source, result.session_id, len(result.skeletons),
+            counts[generate_mod.STATUS_GENERATED], counts[generate_mod.STATUS_NEEDS_MANUAL],
+            counts["written"],
+            "（{}）".format(", ".join(result.written)) if result.written else "",
+        )
+    )
+    return EXIT_OK if counts[generate_mod.STATUS_GENERATED] else EXIT_CHECK_FAILED
 
 
 def cmd_bench(args: argparse.Namespace) -> int:
@@ -429,12 +461,12 @@ def build_parser() -> argparse.ArgumentParser:
     add_config_arg(reconstruct)
     reconstruct.set_defaults(handler=cmd_reconstruct)
 
-    generate = sub.add_parser("generate", help="M4：生成 pytest 回归骨架")
-    generate.add_argument("episode", metavar="EPISODE_ID", help="episode_id")
-    generate.add_argument("--repo", metavar="DIR", default=None, help="目标仓库根（生成物只写其测试目录）")
-    generate.add_argument("--out-dir", metavar="DIR", default=None, help="输出目录覆盖（隔离验证用）")
+    generate = sub.add_parser("generate", help="M4：生成 pytest 回归骨架（模板 + AST，零模型）")
+    generate.add_argument("episode", metavar="EPISODE_REF", help="episode 引用：<会话引用>#<首次修复事件序号>（会话引用同 reconstruct）")
+    generate.add_argument("--repo", metavar="DIR", default=None, help="目标仓库根（生成物只写其测试目录，源码一个字节都不动）")
+    generate.add_argument("--out-dir", metavar="DIR", default=None, help="隔离输出根覆盖（目录形态与目标仓库一致；与 --repo 二选一）")
     add_config_arg(generate)
-    generate.set_defaults(handler=_make_staged_handler("generate"))
+    generate.set_defaults(handler=cmd_generate)
 
     verify = sub.add_parser("verify", help="M5：RED/GREEN 双验证（隔离副本内）")
     verify.add_argument("episode", metavar="EPISODE_ID", help="episode_id")

@@ -25,6 +25,17 @@
   "expect_filter_reasons": [
     "no_failure_evidence"
   ],
+  "expect_generated": {
+    "anchor_fragments": [],
+    "assumed_convention": false,
+    "candidate_count": 0,
+    "generated_count": 0,
+    "reasons": [],
+    "sections": [],
+    "statuses": [],
+    "symbols": [],
+    "written_count": 0
+  },
   "expect_reconstructions": [],
   "input_file": "claude/no-failure-signal-1.jsonl",
   "sample": "no-failure-signal-1",

@@ -25,6 +25,31 @@
   ],
   "expect_episodes": 1,
   "expect_filter_reasons": [],
+  "expect_generated": {
+    "anchor_fragments": [
+      "sess-demo-0009",
+      "/demo/alpha/src/calc.py",
+      "empty denominator"
+    ],
+    "assumed_convention": true,
+    "candidate_count": 1,
+    "generated_count": 1,
+    "reasons": [
+      ""
+    ],
+    "sections": [
+      "act",
+      "arrange",
+      "assert"
+    ],
+    "statuses": [
+      "generated"
+    ],
+    "symbols": [
+      "divide"
+    ],
+    "written_count": 1
+  },
   "expect_reconstructions": [
     {
       "after": "def divide(a, b):\n    return a / b if b else 0\n",

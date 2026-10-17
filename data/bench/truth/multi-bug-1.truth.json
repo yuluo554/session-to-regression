@@ -28,6 +28,36 @@
   ],
   "expect_episodes": 2,
   "expect_filter_reasons": [],
+  "expect_generated": {
+    "anchor_fragments": [
+      "sess-demo-0003#4",
+      "sess-demo-0003#9",
+      "/demo/alpha/src/calc.py",
+      "/demo/beta/pkg/format.py",
+      "uppercase letters"
+    ],
+    "assumed_convention": true,
+    "candidate_count": 1,
+    "generated_count": 1,
+    "reasons": [
+      "",
+      "assert_not_derivable"
+    ],
+    "sections": [
+      "act",
+      "arrange",
+      "assert"
+    ],
+    "statuses": [
+      "generated",
+      "needs_manual"
+    ],
+    "symbols": [
+      "divide",
+      "slugify"
+    ],
+    "written_count": 2
+  },
   "expect_reconstructions": [
     {
       "after": "def divide(a, b):\n    return a / b if b else 0\n",

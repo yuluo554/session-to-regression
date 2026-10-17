@@ -29,6 +29,31 @@
   ],
   "expect_episodes": 1,
   "expect_filter_reasons": [],
+  "expect_generated": {
+    "anchor_fragments": [
+      "sess-demo-0002",
+      "/demo/alpha/src/calc.py",
+      "empty input"
+    ],
+    "assumed_convention": true,
+    "candidate_count": 1,
+    "generated_count": 1,
+    "reasons": [
+      ""
+    ],
+    "sections": [
+      "act",
+      "arrange",
+      "assert"
+    ],
+    "statuses": [
+      "generated"
+    ],
+    "symbols": [
+      "first"
+    ],
+    "written_count": 1
+  },
   "expect_reconstructions": [
     {
       "after": "def first(items):\n    return items[0] if items else None\n",

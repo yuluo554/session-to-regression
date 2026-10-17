@@ -25,6 +25,21 @@
   ],
   "expect_episodes": 1,
   "expect_filter_reasons": [],
+  "expect_generated": {
+    "anchor_fragments": [],
+    "assumed_convention": true,
+    "candidate_count": 0,
+    "generated_count": 0,
+    "reasons": [
+      "reconstruction_not_usable:unresolved"
+    ],
+    "sections": [],
+    "statuses": [
+      "needs_manual"
+    ],
+    "symbols": [],
+    "written_count": 0
+  },
   "expect_reconstructions": [
     {
       "after": null,

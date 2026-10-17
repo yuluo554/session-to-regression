@@ -23,6 +23,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import List, NamedTuple, Optional, Sequence, Tuple
 
@@ -35,6 +36,10 @@ from s2r import cli, errors, stdio  # noqa: E402  （需要先补 sys.path）
 
 BARE = "bare"
 MODULE = "module"
+
+#: 临时目录占位符：需要产物落点的命令（如 `generate`）用它——冒烟**不许往仓库里写文件**
+#: （K11：只写测试目录；写进本仓库会污染工作区、还会被 EOL/脱敏门扫到）。
+TMP_TOKEN = "%TMP%"
 
 #: 每个子命令的冒烟调用形态（covers = 被覆盖的子命令或 --version；form = 调用形态）。
 #: 期望退出码**自动推导**：仍在「阶段未就绪」表里的命令 = 4；已交付的必须在此登记真实期望值。
@@ -49,7 +54,10 @@ INVOCATIONS = {
     # reconstruct 用**固定 harness 的样本**（multi-bug-1 恒为 Claude 侧），
     # 不依赖 RNG 选型；它同时是 ② 路径（old_string + originalFile）的冒烟面。
     "reconstruct": ["data/bench/claude/multi-bug-1.jsonl"],
-    "generate": ["sess-demo-0001#1"],
+    # generate 也是固定 harness 的样本（multi-bug-1 恒为 Claude 侧）；`#<序号>` 是 episode 引用，
+    # 序号取该会话里**首个**修复事件的源行号（语料冻结 → 序号也冻结）。
+    # 落点用 %TMP%：生成物必须写到测试目录，**不许写进本仓库**（K11），故由 run_one 现开临时目录。
+    "generate": ["data/bench/claude/multi-bug-1.jsonl#4", "--out-dir", TMP_TOKEN],
     "verify": ["sess-demo-0001#1"],
     "run": ["--target", "demo-target"],
 }
@@ -59,6 +67,9 @@ DELIVERED_EXPECT = {
     "scan": errors.EXIT_OK,
     "bench": errors.EXIT_OK,
     "reconstruct": errors.EXIT_OK,
+    # multi-bug-1 的第一个 episode 走 ①/② 路径（before 全文可得），diff 是"加守卫"形态
+    # → 能推出候选断言 → 至少一份骨架 = 0；推不出来时会是 1（那时才该来改这条登记）。
+    "generate": errors.EXIT_OK,
 }
 
 
@@ -99,13 +110,21 @@ def build_smoke() -> List[Smoke]:
 
 
 def run_one(row: Smoke, cwd: Path) -> Tuple[bool, int, str]:
-    """跑一条冒烟；返回 (是否符合预期, 实际退出码, 输出摘要)。"""
+    """跑一条冒烟；返回 (是否符合预期, 实际退出码, 输出摘要)。
+
+    含 `%TMP%` 的 argv 现开一个临时目录替换（用完即删）——产物落点必须与仓库隔离。
+    """
+    argv = list(row.argv)
+    tmp_dir: Optional[str] = None
+    if TMP_TOKEN in argv:
+        tmp_dir = tempfile.mkdtemp(prefix="s2r-smoke-")
+        argv = [tmp_dir if item == TMP_TOKEN else item for item in argv]
     env = dict(os.environ)
     env["PYTHONUTF8"] = "1"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     try:
         proc = subprocess.run(
-            list(row.argv),
+            argv,
             cwd=str(cwd),
             env=env,
             stdout=subprocess.PIPE,
@@ -115,9 +134,12 @@ def run_one(row: Smoke, cwd: Path) -> Tuple[bool, int, str]:
             timeout=120,
         )
     except FileNotFoundError:
-        return False, -1, "命令不存在: {}".format(row.argv[0])
+        return False, -1, "命令不存在: {}".format(argv[0])
     except subprocess.TimeoutExpired:
         return False, -2, "超时"
+    finally:
+        if tmp_dir is not None:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
     output = (proc.stdout or "").replace("\r\n", "\n").strip()
     tail = " | ".join(line for line in output.split("\n") if line)[-200:]
     return proc.returncode == row.expect_exit, proc.returncode, tail

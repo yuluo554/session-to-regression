@@ -50,6 +50,14 @@ assumed_tests_dir = "tests/regression"
 manifest_path = "regression/manifest.json"
 arrange_placeholder = "# TODO: arrange"
 assert_placeholder = "# TODO: assert"
+# M4：骨架的固定三段（段名即生成物里的段标记；"三段在场"由基准逐样本对账）
+sections = ["arrange", "act", "assert"]
+# Act 段占位（arrange 构造不出时只留占位，绝不写"看起来像调用"的东西）
+act_placeholder = "# TODO: act"
+# 候选断言必须带这句标注（"占位 + 候选"的判据；文案唯一来源在本文件）
+candidate_note = "候选断言（需人工确认）"
+# 兜底探测值：diff 推不出"该参数取什么值"时用它填最小调用（可构造 ≠ 语义正确，故仍标候选）
+arrange_probe = "None"
 
 [vocabulary]
 # 语义词表：唯一来源在本文件；源码与测试不得内嵌词面（守门测试锁死）。

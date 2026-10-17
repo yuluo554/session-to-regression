@@ -12,7 +12,8 @@
     "filter_reasons",
     "episode_statuses",
     "episode_count",
-    "reconstructions"
+    "reconstructions",
+    "generated"
   ],
   "coverage": {
     "min_count_by_type": {
@@ -46,7 +47,6 @@
     "codex"
   ],
   "pending_facts": {
-    "generated_tests": "M4：pytest 骨架生成落地后由 bench 对账生成内容",
     "red_green": "M5：RED/GREEN 双验证落地后由 bench 对账退出码"
   },
   "privacy": {
@@ -94,7 +94,7 @@
       "sample": "happy-path-1",
       "sha256": "fb340347e5e7f9c08dae03d679ec9b754e437a889c30b9219124f9b28a7934cb",
       "truth": "truth/happy-path-1.truth.json",
-      "truth_sha256": "b6b7c57fd1a1cdbf87b9970c1f4f52b3687a5130a79ce7733da97ca4193d14e4"
+      "truth_sha256": "d1020a97ed9958f9fc399383b02c24ec099c29787a47f41036126f3cbe0af995"
     },
     {
       "bytes": 2320,
@@ -105,7 +105,7 @@
       "sample": "ended-without-pass-1",
       "sha256": "6009ddedf3374eca0d6ed2f175798ebf6762e0b3f959dea6f1757e853d4db062",
       "truth": "truth/ended-without-pass-1.truth.json",
-      "truth_sha256": "c2df55ee8c34071686f722b00e888339c8181f3287b56bdf1061777bbb30643d"
+      "truth_sha256": "e3e72a7ad750669ae1ada210fd0561f11a167ea4d9a339f90f2210b7edcff4db"
     },
     {
       "bytes": 6164,
@@ -116,7 +116,7 @@
       "sample": "multi-bug-1",
       "sha256": "89f0d1e74d72ce39df5a61210cc41266cbe81782d333380c06617c95b54b80c9",
       "truth": "truth/multi-bug-1.truth.json",
-      "truth_sha256": "bac3fefc5dded788571a86c465451ed7c38748028d553036d4704c01c2c0d852"
+      "truth_sha256": "2aaddea3d00a243dedad9a129204906dc4d9edc63294fccfaaae6554396f5eaf"
     },
     {
       "bytes": 1720,
@@ -127,7 +127,7 @@
       "sample": "no-failure-signal-1",
       "sha256": "657fdeba912fbb80070c4779d599ecfbc54729af144a8a4070eae9cd3b2f0298",
       "truth": "truth/no-failure-signal-1.truth.json",
-      "truth_sha256": "b0bf8bb402241c7a506de02264c95de66edd6dd86b7e3c0a26dae6b311ae6ffd"
+      "truth_sha256": "cefece4837e5efaee5dc117b516da3b23b862e85bfae7b67ffcd0f896ee1d1a2"
     },
     {
       "bytes": 2576,
@@ -138,7 +138,7 @@
       "sample": "doc-only-1",
       "sha256": "9691be1e64dd29ec54a154dfea012717b0926ce465d0852c27e728c92a31cb11",
       "truth": "truth/doc-only-1.truth.json",
-      "truth_sha256": "5f083ef2d37f53c1992c6db92136a83b0f130d5d788ee677d15849a8adf1cb30"
+      "truth_sha256": "95c51c9b3fab032b6bcbf56460fd2519612bc5929013671cfb6d234bb5f9f3c5"
     },
     {
       "bytes": 2641,
@@ -149,7 +149,7 @@
       "sample": "ambiguous-old-string-1",
       "sha256": "e32807e614e17f8f7cf605bac18fdd9f2d85fc4f5960db810eb88819e41c2536",
       "truth": "truth/ambiguous-old-string-1.truth.json",
-      "truth_sha256": "1daac5b43f59c5d326fe741ee58f86a756e5e3489c980984670fc6c9ea1f0e2f"
+      "truth_sha256": "fa8b4364aa0ea8a144de23b7011c0e86c81965317157b630009171d21c71116e"
     },
     {
       "bytes": 2559,
@@ -160,7 +160,7 @@
       "sample": "new-file-write-1",
       "sha256": "c07ba05f3d9bfd3490803d3e026ab6bd1ffb5375da7d0bcc950fb453359205e4",
       "truth": "truth/new-file-write-1.truth.json",
-      "truth_sha256": "ce4d181967ab51ca131cd4dbcf6189d2e4df8c17a196743dd6680867943bd965"
+      "truth_sha256": "3d94f0957e23358f7c2d1697484c55eb5968b5b5f26efa910dada6c195dbd155"
     },
     {
       "bytes": 146,
@@ -182,7 +182,7 @@
       "sample": "structured-patch-1",
       "sha256": "75298d2eabf102589d85b6eea4c080cd5b408425ba5f2d62ee35c5f84b4e94ea",
       "truth": "truth/structured-patch-1.truth.json",
-      "truth_sha256": "007bb05771cbe82bdc70fb7677636b0e4e341476af736e5d2838ef5e15958ce6"
+      "truth_sha256": "d8bd80ca6f6fcc574fc90a84cc2b09eb8833104c2f89bea08ba6418b507b4c01"
     },
     {
       "bytes": 2095,
@@ -193,7 +193,7 @@
       "sample": "base-drift-1",
       "sha256": "7f4035be16870030f69117811318e5ad7664e93d8ff729266a3e660226707538",
       "truth": "truth/base-drift-1.truth.json",
-      "truth_sha256": "4aa3756652799452e490b1bc3b706c1cec11b0e999f391be2dcefbf5a9659f6a"
+      "truth_sha256": "2ee3b989670c5c7f5810a3dad76aaedcd30ddb2c726d661006ec9398a5cb7f42"
     }
   ],
   "seed": 20261017,

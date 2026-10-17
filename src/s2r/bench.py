@@ -19,15 +19,24 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
-from . import benchdata, episode as episode_mod, events, readers, reconstruct as reconstruct_mod, serialize
+from . import benchdata, episode as episode_mod, events, generate as generate_mod, readers, reconstruct as reconstruct_mod, serialize
 from .errors import InputUnavailable, UnsupportedFormat
 
 MANIFEST_NAME = benchdata.MANIFEST_NAME
 
 #: 探活名：向"读到的实际事实"注入缺陷，基准必须检出
-PROBES = ("drop-tool", "zero-events", "drop-exit-code", "accept-unknown", "drop-episode", "keep-filtered", "swap-before-after")
+PROBES = (
+    "drop-tool",
+    "zero-events",
+    "drop-exit-code",
+    "accept-unknown",
+    "drop-episode",
+    "keep-filtered",
+    "swap-before-after",
+    "drop-candidate-assert",
+)
 
-#: 对账的字段集（与 manifest 的 checked_facts 对应；`reconstructions` 属 M3）
+#: 对账的字段集（与 manifest 的 checked_facts 对应；`reconstructions` 属 M3、`generated` 属 M4）
 CHECKED_FACTS = (
     "source",
     "format_version",
@@ -44,10 +53,25 @@ CHECKED_FACTS = (
     "filter_reasons",
     # M3 起：还原层事实（真值里的 expect_reconstructions 逐文件声明 before/after/status/source/confidence）
     "reconstructions",
+    # M4 起：生成层事实（真值里的 expect_generated 声明骨架数 / 逐 episode 状态与原因 / 候选断言条数 / 锚点）
+    "generated",
 )
 
 #: 逐文件对账的键（真值可只声明其中一部分；键集合由测试锁死）
 RECONSTRUCTION_FACTS = ("file", "status", "source", "confidence", "before", "after", "hunk_count")
+
+#: 生成层对账的键（同上：真值声明哪些键、就逐键比对）
+GENERATED_FACTS = (
+    "generated_count",
+    "written_count",
+    "statuses",
+    "reasons",
+    "symbols",
+    "candidate_count",
+    "sections",
+    "assumed_convention",
+    "anchor_fragments",
+)
 
 
 def load_manifest(data_dir: Path) -> Mapping[str, Any]:
@@ -94,6 +118,9 @@ def _facts(file_read: readers.FileRead, expected: Mapping[str, Any], cfg: Mappin
     session_files = {event.session_id: str(file_read.path) for event in file_read.events}
     split = episode_mod.split(file_read.events, cfg, session_files=session_files)
     reconstruction = reconstruct_mod.reconstruct_session(file_read, cfg, repo=repo)
+    generation = generate_mod.plan_session(file_read, cfg, repo=repo)
+    declared_generated = expected.get("generated") if isinstance(expected.get("generated"), Mapping) else {}
+    anchors = declared_generated.get("anchor_fragments") or []
     return {
         "source": file_read.source,
         "format_version": file_read.format_version,
@@ -107,6 +134,7 @@ def _facts(file_read: readers.FileRead, expected: Mapping[str, Any], cfg: Mappin
         "episode_statuses": [item.status for item in split.episodes],
         "filter_reasons": sorted(str(item["reason"]) for item in split.filtered),
         "reconstructions": [item.fact() for item in reconstruction.files],
+        "generated": generate_mod.summarize(generation, anchors=anchors),
     }
 
 
@@ -120,9 +148,27 @@ def compare(expected: Mapping[str, Any], actual: Mapping[str, Any]) -> List[str]
             # 逐文件、逐字段点名——汇总成"两边不等"就说不清是哪一文件的哪一项坏了
             mismatches.extend(compare_reconstructions(expected[field], actual.get(field)))
             continue
+        if field == "generated":
+            # 生成层逐键点名（生成事实里含不可对账的明细，故不整体比较）
+            mismatches.extend(compare_generated(expected[field], actual.get(field)))
+            continue
         want, got = expected[field], actual.get(field)
         if want != got:
             mismatches.append("{}: 期望 {!r}，实际 {!r}".format(field, want, got))
+    return mismatches
+
+
+def compare_generated(expected: Any, actual: Any) -> List[str]:
+    """生成层事实逐键对账：差异点名到 `generated.<键>`（并给出两边取值）。"""
+    mismatches: List[str] = []
+    if not isinstance(expected, Mapping):
+        return mismatches
+    got = actual if isinstance(actual, Mapping) else {}
+    for key in GENERATED_FACTS:
+        if key not in expected:
+            continue
+        if expected[key] != got.get(key):
+            mismatches.append("generated.{}: 期望 {!r}，实际 {!r}".format(key, expected[key], got.get(key)))
     return mismatches
 
 
@@ -168,6 +214,12 @@ def _apply_probe(probe: Optional[str], actual: Dict[str, Any]) -> Dict[str, Any]
         for item in actual.get("reconstructions") or []:
             if isinstance(item, dict) and isinstance(item.get("before"), str) and isinstance(item.get("after"), str):
                 item["before"], item["after"] = item["after"], item["before"]
+    elif probe == "drop-candidate-assert":
+        # 模拟 M4 最典型的空转：骨架照写、三类锚点都在，但**候选断言整段丢掉**
+        # （模板退化成"只有 docstring 的装饰品"）。注入打在判定路径上：候选事实归零。
+        generated = actual.get("generated")
+        if isinstance(generated, dict):
+            generated["candidate_count"] = 0
     return actual
 
 
@@ -287,6 +339,10 @@ def _check_sample(
     if "expect_reconstructions" in truth:
         expected = dict(expected)
         expected["reconstructions"] = list(truth["expect_reconstructions"] or [])
+    # M4：生成层期望（骨架数 / 逐 episode 状态与原因 / 候选断言条数 / 必须出现的证据锚点）
+    if "expect_generated" in truth:
+        expected = dict(expected)
+        expected["generated"] = dict(truth["expect_generated"] or {})
     expect_error = truth.get("expect_error")
     # 磁盘基线：Codex 侧的全文 before 只能来自"该编辑发生前的磁盘状态"（随语料冻结）
     repo_rel = str(sample.get("repo") or "")

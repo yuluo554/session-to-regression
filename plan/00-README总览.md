@@ -23,7 +23,7 @@
 | `07-交付对标与决策记录.md` | 材料与评分逐项对标、待拍板项、决策记录、**既定口径 K 清单** | ✅ M0 定稿 2026-10-17 |
 | `verify/README.md` | 本地等价校验逐条留档（命令 → 退出码 → 语义判定）+ 变异验证 + 与 CI 的缺口 | ✅ M0 留档 2026-10-17 |
 | `HANDOFF-M1.md` | 下一棒交接：进度+证据 / 待办 / K 口径 / 环境坑 / DoD / 命令速查 | ✅ M0 收尾落盘 2026-10-17 |
-| `HANDOFF-M2.md` · `HANDOFF-M3.md` · `HANDOFF-M4.md` | 每棒交接（六节同构）；M4 为当前入口 | ✅ 逐棒落盘 2026-10-17 |
+| `HANDOFF-M2.md` … `HANDOFF-M4.md` · `HANDOFF-M5.md` | 每棒交接（六节同构）；M5 为当前入口 | ✅ 逐棒落盘 2026-10-17 |
 
 > 里程碑收尾纪律沿用系列惯例：**DoD 达成后必须在本对话内写完下一棒的 `HANDOFF-M<next>.md` 才允许结束**。
 
@@ -62,9 +62,9 @@
 | M1 双 harness 读取器（Claude jsonl + Codex rollout → 统一事件流） | `~/.claude/projects/**/*.jsonl` ✅；`~/.codex/sessions/**/*.jsonl` ✅ 220 文件 | 随包，零网络；路径可覆盖（含环境变量） | 合成语料逐字段对账（8/8）+ 同日志双跑逐字节一致 + 未知格式/版本指纹显式报错 | ✅ M1 |
 | M2 episode 切分器（确定性规则 + 打分） | 事件流 + 语义词表（配置一处定义） | 随包 | 合成语料逐例对账（多 bug / 未修复 / 先成后败 / 仅提问 / 只改文档 / 无 before）；权重与阈值只读配置 | ✅ M2 |
 | M3 差分还原器（logs-only，不依赖 git） | `originalFile`+非空 `structuredPatch` ✅ 全量 305 条里 223 条非空 / 107 条带全文；Edit `old_string` ✅ 252/252；Codex `FileChange.unified_diff` ✅ 1892 条（含 2347 个变更对象）与 `apply_patch` ✅ 104 次 | 随包；磁盘基线**可选**（显式 `--repo`，只读） | 合成基准 before/after **逐字符**对账（逐文件 source/confidence/status 点名）+ 同日志双跑逐字节一致 + 真实日志只读抽验（聚合读数见 [verify/README.md](verify/README.md) §M3.5） | ✅ M3 |
-| M4 pytest 骨架生成器（模板 + AST，零模型） | M3 输出 + 仓库测试约定探测 | 随包；生成物落用户仓库 `tests/regression/` | 合成基准生成内容对账；同 episode 逐字节稳定；约定探测失败走保守默认并标注 | ⬜ 待 M4 |
+| M4 pytest 骨架生成器（模板 + AST，零模型） | M3 输出 + 仓库测试约定探测 | 随包；生成物落用户仓库 `tests/regression/` | 合成基准生成内容对账（骨架数 / 逐 episode 结论与原因 / 候选断言条数 / 必需锚点）+ 同 episode 双跑逐字节一致 + 生成物 RED→GREEN 语义核对 + 约定探测失败走保守默认并标注 | ✅ M4 |
 | M5 RED 验证器 + `manifest.json` | 隔离临时副本 + pytest | 随包；pytest 为运行期可选依赖（缺失 exit 3） | before 必失败 / after 必通过双跑；未通过项不进正式目录；退出码四语义测试 | ⬜ 待 M5 |
-| 合成会话基准 + 植入真值 | 程序化生成 Claude / Codex 两种格式，假项目名 / 假路径白名单 | 随包零外部依赖、零 API（参照实现在包内 `s2r.benchdata`） | 生成器同步标注真值（含逐文件 before/after 与磁盘基线夹具）；覆盖度门槛写 manifest；`tools/gen_bench.py --check` 位级一致；`s2r bench` 双边门（检出 10/10、误报 0）+ **七探活** | ✅ M1–M3 |
+| 合成会话基准 + 植入真值 | 程序化生成 Claude / Codex 两种格式，假项目名 / 假路径白名单 | 随包零外部依赖、零 API（参照实现在包内 `s2r.benchdata`） | 生成器同步标注真值（含逐文件 before/after、生成层期望与磁盘基线夹具）；覆盖度门槛写 manifest；`tools/gen_bench.py --check` 位级一致；`s2r bench` 双边门（检出 10/10、误报 0）+ **八探活** | ✅ M1–M4 |
 | 隐私设计（纯本地零上传） | 无网络依赖 | 全链路本地 | 依赖扫描 + 断网运行 + 入库内容扫描（真实路径 / session id 零命中） | ⬜ 待 M5 |
 | 发布闭环（tag + Release 附产物 + 留档） | GitHub 公开仓库 | Release 附源码 zip + sha256 留档 | **仓库内耐久副本 + sha256 可复验**；tag 树内含发布留档 | ⬜ 待 M6 |
 | 多语言生成（mjs/ts） | 扩展项 | 不入首期 | — | ⬜ 扩展 |
@@ -99,7 +99,7 @@
 | **M1 数据先行** | ①三个 ⬜ 待核对字段逐样本核对并写入 data/README；②合成会话日志生成器（Claude + Codex 双格式）+ 程序化植入真值；③覆盖度门槛口径进 manifest；④事件流 IR 定稿 | 字段核对记录可回溯（样本脱敏描述 + 结论）；生成器与真值标注入仓可审计；`s2r scan` 能对合成日志产出稳定事件流；未知格式显式报错 |
 | **M2 episode 切分** | 语义词表、切分状态机、打分与阈值过滤、边界情形落定 | 合成基准切分真值全对账；多 bug / 未修复 / 先成后败边界例各有断言；打分权重只读配置 |
 | **M3 差分还原** ✅ | 三级降级还原（`originalFile`+非空 `structuredPatch` → `old_string`/`new_string` 定位 → Codex `FileChange.unified_diff`/patch 文本）+ 逐文件置信度 + 磁盘基线可选对齐 | 合成基准 before/after 逐字符对账；三条降级路径各有具名样本；不可定位时 `unresolved` 而非任选；磁盘对不上如实降级；同一输入同输出（单元 + CLI 两层） |
-| **M4 生成器** | 测试约定探测、AST 读签名、模板生成、docstring 证据锚点、候选断言 | 合成基准生成内容对账；同 episode 逐字节稳定；`needs_manual` 有明确原因；不改源码 |
+| **M4 生成器** ✅ | 测试约定探测、AST 读签名、模板生成、docstring 证据锚点、候选断言 | 合成基准生成内容对账（含候选断言条数）；同 episode 逐字节稳定（单元 + CLI 两层）；`needs_manual` 逐条有原因；不改源码（源码树哈希不变）；15 项变异全红 |
 | **M5 验证与交付** | 隔离副本 RED/GREEN 验证、manifest、CLI 退出码语义、README 演示、技术报告 | 未通过项不落正式目录；退出码 0/1/2/3 各有测试；`pip install .` 干净环境实跑；断网运行 |
 | **M6 发布** | 发布 GitHub **公开**仓库 | **DoD 三件套**：①`git tag`；②**GitHub Release 附产物**（源码 zip，本地留副本 + **sha256 留档可复验**）；③**发布留档文件**（`plan/RELEASE-M6.md`，**在 tag 之前写好并进 tag 树**）。另：发布前跑 `scripts/check_release.py` 无 FAIL；提交面脱敏全 0（含 tag tagger 邮箱）；tag 后事实（附件 sha256 / 下载复核）作为**追加提交**分栏记录 |
 
@@ -123,19 +123,23 @@
 
 ## 七、下一步（交接语）
 
-**M0（骨架）· M1（数据先行 + 读取器 + 合成基准）· M2（episode 切分）· M3（差分还原）已于 2026-10-17 完成**：
-计划文档 00–07 定稿、骨架落地、字段核对与三处勘误入台账、`scan`/`bench`/`reconstruct` 三条命令跑通、
-门禁与本地等价校验逐条留档（见 [verify/README.md](verify/README.md)）。
-下一棒入口 = [plan/HANDOFF-M4.md](HANDOFF-M4.md)（六节：进度+证据 / 待办 / K 口径 / 环境坑 / DoD / 命令速查）。
+**M0（骨架）· M1（数据先行 + 读取器 + 合成基准）· M2（episode 切分）· M3（差分还原）·
+M4（pytest 骨架生成）已于 2026-10-17 完成**：
+计划文档 00–07 定稿、骨架落地、字段核对与三处勘误入台账、`scan`/`bench`/`reconstruct`/`generate`
+四条命令跑通、门禁与本地等价校验逐条留档（见 [verify/README.md](verify/README.md)）。
+下一棒入口 = [plan/HANDOFF-M5.md](HANDOFF-M5.md)（六节：进度+证据 / 待办 / K 口径 / 环境坑 / DoD / 命令速查）。
 
 新对话第一条命令（绝对路径只出现在用户侧启动命令里）：
 
-    /goal 读取 "<项目绝对路径>/plan/HANDOFF-M4.md" 继续完成任务
+    /goal 读取 "<项目绝对路径>/plan/HANDOFF-M5.md" 继续完成任务
 
-M4 要做的事（详见 HANDOFF-M4 与 [06-里程碑.md](06-里程碑.md)）：把 M3 的
-`Reconstruction{file, before, after, hunks[], source, confidence, status}` 接成
-`tests/regression/test_<slug>.py` 骨架（约定探测 + AST 读签名 + 模板 + docstring 证据锚点 +
-候选断言），同 episode 逐字节稳定、`needs_manual`/`assumed_convention` 显式可见、**不改任何源码**。
+M5 要做的事（详见 HANDOFF-M5 与 [06-里程碑.md](06-里程碑.md)）：在**隔离临时副本**里做 RED/GREEN
+双验证（before 必失败 / after 必通过），把结论写进 `regression/manifest.json`（含生成器版本与覆盖度门槛），
+落地 `s2r verify` / `s2r run` 并退役最后两条 exit 4；未通过的项**不进正式测试目录**。
+
+**给 M5 的关键事实（M4 实测）**：生成的候选断言**真的能证伪**——`assert result == 0` 在
+`return a / b`（修复前）上抛 ZeroDivisionError（红）、在 `return a / b if b else 0`（修复后）上通过（绿），
+已在隔离临时目录内端到端复现（见 `tests/test_generate_cli.py::test_generated_candidate_is_red_before_and_green_after`）。
 
 **提醒（写进每一棒交接语）**：①发布类里程碑须含 **tag · Release 附产物 · 发布留档** 三件套；
 ②收尾必须跑 `scripts/check_release.py`（M6 交付物，当前未创建）；③本题**不依赖 git 还原 diff**，

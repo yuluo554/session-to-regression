@@ -114,9 +114,11 @@ def test_manifest_declares_coverage_thresholds_and_pending_facts(tmp_path, repo_
         assert observed >= minimum, "{}: 生成量 {} < 门槛 {}".format(episode_type, observed, minimum)
     assert "episodes" not in manifest["pending_facts"], "M2 起 episode 已真对账，不该再挂在 pending 里"
     assert "before_after" not in manifest["pending_facts"], "M3 起 before/after 已真对账，pending 里不许再有它"
-    assert set(manifest["pending_facts"]) == {"generated_tests", "red_green"}, "未对账的面必须显式列出且只剩 M4–M5"
+    assert "generated_tests" not in manifest["pending_facts"], "M4 起生成内容已真对账，pending 里不许再有它"
+    assert set(manifest["pending_facts"]) == {"red_green"}, "未对账的面必须显式列出且只剩 M5"
     assert "episode_count" in manifest["checked_facts"], "episode 事实必须进对账面"
     assert "reconstructions" in manifest["checked_facts"], "M3 还原事实必须进对账面"
+    assert "generated" in manifest["checked_facts"], "M4 生成事实必须进对账面"
     assert manifest["thresholds"]["max_false_positive"] == 0
     # 磁盘基线夹具也是冻结物（Codex 侧的全文 before 只能来自这里）
     assert manifest["repo_fixtures"], "磁盘基线夹具必须在台账里"
@@ -206,11 +208,51 @@ def test_missing_manifest_is_an_input_error(tmp_path, repo_root):
 
 
 def test_summary_lines_expose_failures_and_pending(repo_root):
-    """摘要必须把"未对账的面"（M4–M5）与失败样本都摆出来，不许只有一句 ok。"""
+    """摘要必须把"未对账的面"（M5）与失败样本都摆出来，不许只有一句 ok。"""
     lines = bench.summary_lines(bench.run(repo_root / "data" / "bench", limits(repo_root), cfg(repo_root), only=["unsupported_format"]))
     assert any("pending" in line for line in lines)
-    assert any("generated_tests" in line for line in lines), "M4 尚未对账的面必须出现在摘要里"
-    assert not any("before_after" in line for line in lines), "M3 已真对账的面不该再出现在 pending 行里"
+    assert any("red_green" in line for line in lines), "M5 尚未对账的面必须出现在摘要里"
+    assert not any("generated_tests" in line for line in lines), "M4 已真对账的面不该再出现在 pending 行里"
+
+
+def test_generated_mismatch_is_attributed_to_the_sample(tmp_path, repo_root):
+    """生成层对账必须点名到 `generated.<键>`——只断言"某样本 fail"会被别的判据蹭走（M2 的教训）。
+
+    变异：真值声明"这个样本不该有候选断言"，而对账实际有 → 必须报 `generated.candidate_count`。
+    """
+    copy = tmp_path / "bench"
+    shutil.copytree(str(repo_root / "data" / "bench"), str(copy))
+    truth = copy / "truth" / "structured-patch-1.truth.json"
+    data = json.loads(serialize.read_text(truth))
+    data["expect_generated"]["candidate_count"] = 0
+    _write_json(truth, data)
+
+    report = bench.run(copy, limits(repo_root), cfg(repo_root), only=["structured_patch"])
+    entry = [item for item in report["samples"] if item["sample"] == "structured-patch-1"][0]
+    assert entry["status"] == "fail", entry
+    assert any("generated.candidate_count" in item for item in entry["mismatches"]), entry["mismatches"]
+    assert report["status"] != "ok"
+    assert any("generated.candidate_count" in line for line in bench.summary_lines(report))
+
+
+def test_declared_anchor_must_really_appear_in_the_skeleton(tmp_path, repo_root):
+    """锚点判据不是摆设：真值声明一个**不在骨架里**的片段 → 对账必须红。"""
+    copy = tmp_path / "bench"
+    shutil.copytree(str(repo_root / "data" / "bench"), str(copy))
+    truth = copy / "truth" / "structured-patch-1.truth.json"
+    data = json.loads(serialize.read_text(truth))
+    data["expect_generated"]["anchor_fragments"] = ["这个片段不在骨架里", "sess-demo-0009"]
+    _write_json(truth, data)
+
+    report = bench.run(copy, limits(repo_root), cfg(repo_root), only=["structured_patch"])
+    entry = [item for item in report["samples"] if item["sample"] == "structured-patch-1"][0]
+    assert entry["status"] == "fail", entry
+    assert any("generated.anchor_fragments" in item for item in entry["mismatches"]), entry["mismatches"]
+
+
+def _write_json(path: Path, data) -> None:
+    with open(str(path), "w", encoding="utf-8", newline="\n") as stream:
+        stream.write(serialize.dumps_json(data))
 
 
 def test_reconstruction_mismatch_is_attributed_to_the_sample(tmp_path, repo_root):

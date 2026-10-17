@@ -270,3 +270,76 @@ git 若在克隆时归一了字节，`s2r bench` 的台账门会当场红。这�
   天然没有 before），3 个是 `unified_diff` 但未给磁盘基线 → 与 §6.10 的 M3-1 结论互相印证；
 * **样本量与抽样方式如实标注**：这是按体积抽的小样本、只作演示约束，**不是**交付承诺，
   也不支撑任何比率结论（真实样本量声明见 `data/README.md` §2.3）。
+
+---
+
+## M4（2026-10-17）pytest 骨架生成：模板 + AST + 生成层真对账
+
+### 1. 逐条命令与退出码语义（本机实跑）
+
+| # | 命令 | 退出码 | 语义判定 |
+|---|---|---|---|
+| 1 | `py -3.8 -X utf8 -m pytest -q` | 0 | ✅ 符合：**294 项通过**（M3 时 243） |
+| 2 | `py -3.12 -X utf8 -m pytest -q` | 0 | ✅ 符合：**294 项通过**（同收集数） |
+| 3 | `s2r generate "data/bench/claude/multi-bug-1.jsonl#4" --out-dir <tmp>` | 0 | ✅ 符合：1 个骨架（生成 1），写出 `tests/regression/test_sess_demo_0003_4.py`；stdout 为机读产物、stderr 为人读摘要 |
+| 4 | `s2r generate "data/bench/claude/ambiguous-old-string-1.jsonl#4" --out-dir <tmp>` | 1 | ✅ 符合：`needs_manual` + `reconstruction_not_usable:unresolved`，**不产文件**（显式降级） |
+| 5 | `s2r generate "data/bench/claude/multi-bug-1.jsonl#9" --out-dir <tmp>` | 1 | ✅ 符合：`assert_not_derivable`（`return name` → `return name.lower()` 推不出候选断言），仍写骨架 |
+| 6 | `s2r generate <ref>`（既没 `--repo` 也没 `--out-dir`） | 2 | ✅ 符合：`usage_error` + 提示"生成物只落测试目录，所以必须先知道目标在哪" |
+| 7 | `s2r generate sess-demo-0003`（缺 `#序号`） | 2 | ✅ 符合：`usage_error` + 引用形态提示 |
+| 8 | `s2r generate "…multi-bug-1.jsonl#77"` | 2 | ✅ 符合：`input_unavailable` + **列出可用序号**（`sess-demo-0003#4` / `#9`） |
+| 9 | `s2r bench` | 0 | ✅ 符合：`ok`（检出 **10/10**、误报 0、台账一致）；`pending` 只剩 M5 的 `red_green` |
+| 10 | `s2r bench --probe <8 个探活>` | 0 ×8 | ✅ 符合：八个注入缺陷全部被检出（新增 `drop-candidate-assert`） |
+| 11 | `python tools/gen_bench.py --check` | 0 | ✅ 符合：语料/真值/磁盘夹具再生成**逐字节一致**（10 样本，rng_draws=5；`.jsonl` 与夹具字节未变 → 序号与旧结论全部沿用） |
+| 12 | `python tools/ci_smoke.py`（已装包环境） | 0 | ✅ 符合：**20/20**（`generate` 已退役 4 → 按真实语义 0，bare + module 两形态；产物落临时目录，仓库工作区零新增文件） |
+| 13 | `python tools/fix_eol.py --check` | 0 | ✅ 符合：87 个文件 0 问题 |
+| 14 | 生成物语义核对（隔离临时目录内实跑 pytest） | 红→绿 | ✅ 符合：同一骨架在 `return a / b` 上 **FAILED（ZeroDivisionError）**、在 `return a / b if b else 0` 上 **1 passed** |
+
+### 2. 变异验证（M4 新增 8 项 + 复核 M1–M3 的 7 项，共 15 项全红）
+
+跑批脚本在仓库树外（`%TEMP%/s2r-mutations/mutate_m4.py`：备份 → 改 → **先确认模块仍可导入** → 跑 → 还原）。
+"RED" 必须来自判据而不是"改坏了模块导致收集失败"——本轮首版 N3 就是后者（缩进改坏 → 收集报错），
+已加导入前置检查并修正变异形态。
+
+| 变异 | 目标判据 | 结果 |
+|---|---|---|
+| N1 模板空转：候选断言不跟随 diff（固定期望值） | `test_changing_the_diff_changes_the_candidate` | RED ✅ |
+| N2 候选断言不写进骨架（退化成只有 docstring 的装饰品） | 三段/锚点测试 + CLI 产物测试 | RED ✅ |
+| N3 探活注入被摘掉（`drop-candidate-assert` 成假门） | 探活检出测试 | RED ✅ |
+| N4 生成期望不再映射进对账面 | 差异点名测试（`generated.<键>`） | RED ✅ |
+| N5 拿 after 当 before 硬造（"还原不 ok 就不生成"被折叠） | `unusable_reconstruction_never_reaches_the_generation_path` | RED ✅ |
+| N6 约定探测失败被静默（`assumed_convention` 永远 False） | 探测测试 + 基准对账 | RED ✅（两层各红一次） |
+| N7 写盘落点越界（生成物写到目标仓库根） | K11 源码树哈希不变测试 | RED ✅ |
+| N8 证据锚点缺一段（docstring 里的失败信号摘录被抹掉） | 锚点测试 + CLI 锚点测试 | RED ✅ |
+| M1–M7（M3 既有 7 项：还原优先级 / 不任选 / K14 非空 / 探活假门 / 对账映射 / `--repo` 显式 / hunk 不任选） | 各自判据 | RED ✅ ×7 |
+
+### 3. 与 CI 的缺口（诚实标注）
+
+* **GitHub Actions 仍未运行**（未建远端）→ CI 结论一律"本地等价校验，未接远端，CI 待首推验证"。
+* 本轮新增等价物：双解释器 294 项、八探活、生成层逐键对账（10 样本全覆盖）、
+  `generate` 的 bare/module 离线冒烟（产物落临时目录）、生成物 RED→GREEN 语义核对、15 项变异。
+* **新增缺口（本机测不了，显式待首推验证）**：① `ci_smoke` 的 `%TMP%` 占位替换在 Linux 腿上的
+  临时目录路径形态；② 生成物在大小写敏感文件系统（Linux）上的 import 形态（拟造的模块名全小写，风险低）；
+  ③ 目标仓库若用 `src/` 布局之外的包根（如 `lib/`），import 前缀推导会走保守默认并标注。
+
+### 4. 真实日志只读抽验（M4，生成层聚合读数）
+
+**方法**：与 M3 同一套抽样（按文件体积取最大的若干份，Claude 40 / Codex 20，跳过 >20 MB），
+逐份 `read_file` → `plan_session(repo=None)`。**只读探针落在仓库树外**，**只打印聚合计数**
+（不打印路径、内容、session id），不写任何文件；**不传 `--repo`**（没有"当时的磁盘状态"可用）。
+
+| 来源 | 读入 | 有 episode 的会话 | episode | 生成结论 | 原因分布 |
+|---|---|---|---|---|---|
+| Claude | 40 份 | 6 | 7 | `generated 0` / `needs_manual 7` | `not_python 4`、`reconstruction_not_usable 3` |
+| Codex | 20 份 | 8 | 8 | `generated 0` / `needs_manual 8` | `reconstruction_not_usable 8` |
+
+**这三行读数怎么解读（写清楚，别包装成"效果不错"）**：
+
+* **真实日志上、不给 `--repo` 时，生成层一份骨架都产不出来**——这与 M3 §5 的结论同源：
+  没有"修改前全文"就没有"修改前的签名"，硬造出来的只是看起来像测试的东西。**这是如实降级，不是缺陷**；
+* Claude 侧的 4 个 `not_python` **全部来自非 `.py` 改动**（实测后缀分布 `.md`×3 / `.css`×1）——
+  首期只生成 Python 测试，所以这个原因码是**说得出理由**的出口（不是笼统的"解析不了"）；
+* Codex 侧 8 个全是 `reconstruction_not_usable`（其日志只给 `unified_diff`/`content`，
+  没有 before 全文）——与 §6.10 的 M3-1 结论互相印证；
+* **真实语料上的生成路径结论 = 未取得**：合成基准 10/10 覆盖生成层（含候选断言与锚点），
+  但真实会话受"无 before 全文"限制，**本机抽验里没有出现一条可生成的真实 episode**
+  ——这条限制写在 README 的"已知限制"里，也是 M5 RED/GREEN 必须先解决 `--repo` 语义的原因。

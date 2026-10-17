@@ -392,6 +392,42 @@ def expect_rec(
     }
 
 
+#: 骨架三段（构造侧声明；与 `[generate].sections` 同义——真值刻意写字面量，
+#: 不复用被测实现的常量，理由同上面的状态/来源枚举）
+GENERATED_SECTIONS = ["act", "arrange", "assert"]
+
+
+def expect_generated(
+    generated: int,
+    written: int,
+    statuses: Sequence[str],
+    reasons: Sequence[str],
+    symbols: Sequence[str] = (),
+    candidates: int = 0,
+    sections: Sequence[str] = (),
+    anchors: Sequence[str] = (),
+    assumed: bool = True,
+) -> Dict[str, Any]:
+    """声明"生成层应该产出什么"（构造侧声明，不由被测实现反推）。
+
+    * `generated` / `written`：含候选断言的骨架数 / 落盘文件数（**空集也是断言**）；
+    * `statuses` / `reasons`：逐 episode 的结论与原因码（`generated` 的原因码是空串）；
+    * `candidates`：活动候选断言条数（"把候选断言整段丢掉"的探活就打在它上面）；
+    * `anchors`：**必须出现在骨架里的片段**（会话 id / 报告片段 / 修复文件路径等证据锚点）。
+    """
+    return {
+        "generated_count": generated,
+        "written_count": written,
+        "statuses": list(statuses),
+        "reasons": list(reasons),
+        "symbols": list(symbols),
+        "candidate_count": candidates,
+        "sections": list(sections),
+        "assumed_convention": assumed,
+        "anchor_fragments": list(anchors),
+    }
+
+
 #: 磁盘基线夹具：样本名 → {仓库内相对路径: 全文}。
 #: 为什么需要（实测事实，`data/README.md` §6.7）：Codex 侧日志里**没有 before 全文**——
 #: `FileChange` 只给 `unified_diff`（修改）或 `content`（新增），`apply_patch` 只给 patch 文本；
@@ -435,6 +471,18 @@ def sample_happy_path(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) 
             "expect_episode_statuses": ["verified_by_run"],
             "expect_filter_reasons": [],
             "expect_reconstructions": [expect_rec(ALPHA_CALC, before, after, "ok", "claude_structured_patch", "high", 1)],
+            # M4：加守卫的改动（`return a / b` → `return a / b if b else 0`）能推出候选断言
+            # （形参 b 绑成与 `else 0` 同型的假值 → assert result == 0）
+            "expect_generated": expect_generated(
+                generated=1,
+                written=1,
+                statuses=["generated"],
+                reasons=[""],
+                symbols=["divide"],
+                candidates=1,
+                sections=GENERATED_SECTIONS,
+                anchors=["sess-demo-0001", ALPHA_CALC, "wrong value"],
+            ),
         }
     # Codex 变体：③ 路径（首选 `FileChange.unified_diff`，同文件的 patch 文本作兜底）
     before = "def format_amount(value):\n    return value\n"
@@ -456,6 +504,17 @@ def sample_happy_path(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) 
         "expect_episode_statuses": ["verified_by_run"],
         "expect_filter_reasons": [],
         "expect_reconstructions": [expect_rec(BETA_FORMAT, before, after, "ok", "codex_unified_diff", "medium", 1)],
+        # M4：`return value` → `return abs(value)` 是"把返回值包了一层调用"，**推不出**候选断言
+        # → 骨架照写（有 arrange/act/三段与锚点），但标 needs_manual 并说明原因
+        "expect_generated": expect_generated(
+            generated=0,
+            written=1,
+            statuses=["needs_manual"],
+            reasons=["assert_not_derivable"],
+            symbols=["format_amount"],
+            sections=GENERATED_SECTIONS,
+            anchors=["sess-demo-0001", BETA_FORMAT, "drops the sign"],
+        ),
     }
 
 
@@ -482,6 +541,18 @@ def sample_ended_without_pass(rng: Splitmix64, cfg: Mapping[str, Any], session_i
         "expect_episode_statuses": ["ended_without_pass"],
         "expect_filter_reasons": [],
         "expect_reconstructions": [expect_rec(ALPHA_CALC, before, after, "ok", "codex_patch_text", "medium", 1)],
+        # M4：Codex 侧的 before 来自磁盘基线（给了 --repo 才有全文）→ 有了全文才谈得上读签名；
+        # 改动是加守卫形态 → 推出 `assert result is None`
+        "expect_generated": expect_generated(
+            generated=1,
+            written=1,
+            statuses=["generated"],
+            reasons=[""],
+            symbols=["first"],
+            candidates=1,
+            sections=GENERATED_SECTIONS,
+            anchors=["sess-demo-0002", ALPHA_CALC, "empty input"],
+        ),
     }
 
 
@@ -512,6 +583,18 @@ def sample_multi_bug(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) -
             expect_rec(ALPHA_CALC, "def divide(a, b):\n    return a / b\n", "def divide(a, b):\n    return a / b if b else 0\n", "ok", "claude_old_string", "high", 1),
             expect_rec(BETA_FORMAT, "def slugify(name):\n    return name\n", "def slugify(name):\n    return name.lower()\n", "ok", "claude_old_string", "high", 1),
         ],
+        # M4：两个 episode 各一条结论——divide（加守卫）能推候选断言，slugify（包了一层调用）不能；
+        # **逐 episode 都要有结论**，不许因为一个推不出来就整会话不产出
+        "expect_generated": expect_generated(
+            generated=1,
+            written=2,
+            statuses=["generated", "needs_manual"],
+            reasons=["", "assert_not_derivable"],
+            symbols=["divide", "slugify"],
+            candidates=1,
+            sections=GENERATED_SECTIONS,
+            anchors=["sess-demo-0003#4", "sess-demo-0003#9", ALPHA_CALC, BETA_FORMAT, "uppercase letters"],
+        ),
     }
 
 
@@ -531,6 +614,10 @@ def sample_no_failure_signal(rng: Splitmix64, cfg: Mapping[str, Any], session_id
         "expect_episode_statuses": [],
         "expect_filter_reasons": ["no_failure_evidence"],
         "expect_reconstructions": [],
+        # M4：没有 episode 就没有骨架（空集也是断言：不许从"没切出来的东西"里生成测试）
+        "expect_generated": expect_generated(
+            generated=0, written=0, statuses=[], reasons=[], sections=[], assumed=False
+        ),
     }
 
 
@@ -548,6 +635,11 @@ def sample_doc_only(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) ->
         "expect_episode_statuses": [],
         "expect_filter_reasons": ["docs_only"],
         "expect_reconstructions": [expect_rec(DOC_TARGET, "run it\n", "run it with --demo\n", "ok", "claude_old_string", "high", 1)],
+        # M4：还原结果**有**（ok），但该候选被 `docs_only` 丢弃 → 没有 episode → 不生成
+        # ——这条正是"还原得了 ≠ 该生成"的判据
+        "expect_generated": expect_generated(
+            generated=0, written=0, statuses=[], reasons=[], sections=[], assumed=False
+        ),
     }
 
 
@@ -570,6 +662,14 @@ def sample_ambiguous_old_string(rng: Splitmix64, cfg: Mapping[str, Any], session
         "expect_episode_statuses": ["ended_without_pass"],
         "expect_filter_reasons": [],
         "expect_reconstructions": [expect_rec(ALPHA_CALC, None, None, "unresolved", "claude_old_string", "none", 0)],
+        # M4：还原落 `unresolved`（不任选一处）→ 没有全文 before → **不进生成路径**，只记原因
+        "expect_generated": expect_generated(
+            generated=0,
+            written=0,
+            statuses=["needs_manual"],
+            reasons=["reconstruction_not_usable:unresolved"],
+            sections=[],
+        ),
     }
 
 
@@ -602,6 +702,14 @@ def sample_new_file_write(rng: Splitmix64, cfg: Mapping[str, Any], session_id: s
         "expect_episode_statuses": ["ended_without_pass"],
         "expect_filter_reasons": [],
         "expect_reconstructions": [expect_rec(NEW_FILE, None, "def helper(value):\n    return value\n", "no_before_image", "claude_write_content", "none", 0)],
+        # M4：纯新建文件没有 **before** 镜像 → 读不出"修改前的签名" → 不生成（宁缺勿造）
+        "expect_generated": expect_generated(
+            generated=0,
+            written=0,
+            statuses=["needs_manual"],
+            reasons=["reconstruction_not_usable:no_before_image"],
+            sections=[],
+        ),
     }
 
 
@@ -635,6 +743,17 @@ def sample_structured_patch(rng: Splitmix64, cfg: Mapping[str, Any], session_id:
         "expect_episode_statuses": ["verified_by_run"],
         "expect_filter_reasons": [],
         "expect_reconstructions": [expect_rec(ALPHA_CALC, before, after, "ok", "claude_structured_patch", "high", 1)],
+        # M4：① 路径 + 加守卫 → 候选断言 `assert result == 0`（活动 assert，1 条）
+        "expect_generated": expect_generated(
+            generated=1,
+            written=1,
+            statuses=["generated"],
+            reasons=[""],
+            symbols=["divide"],
+            candidates=1,
+            sections=GENERATED_SECTIONS,
+            anchors=["sess-demo-0009", ALPHA_CALC, "empty denominator"],
+        ),
     }
 
 
@@ -659,6 +778,14 @@ def sample_base_drift(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) 
         "expect_episode_statuses": ["ended_without_pass"],
         "expect_filter_reasons": [],
         "expect_reconstructions": [expect_rec(ALPHA_CALC, None, None, "partial", "codex_patch_text", "low", 1)],
+        # M4：只有片段（`before` 为 null）→ 无全文可读签名 → 不生成（partial 也进不了生成路径）
+        "expect_generated": expect_generated(
+            generated=0,
+            written=0,
+            statuses=["needs_manual"],
+            reasons=["reconstruction_not_usable:partial"],
+            sections=[],
+        ),
     }
 
 
@@ -801,6 +928,9 @@ def write_corpus(out_dir: Path, cfg: Mapping[str, Any], force: bool = False) -> 
         # M3：还原层期望（逐文件 before/after / 状态 / 来源 / 置信度，同样由构造侧声明）
         if "expect_reconstructions" in meta:
             truth["expect_reconstructions"] = meta["expect_reconstructions"]
+        # M4：生成层期望（骨架数 / 逐 episode 状态与原因 / 候选断言条数 / 必须出现的证据锚点）
+        if "expect_generated" in meta:
+            truth["expect_generated"] = meta["expect_generated"]
         if "expect_error" in meta:
             truth["expect_error"] = meta["expect_error"]
         truth_relative = "truth/{}.truth.json".format(name)
@@ -851,9 +981,10 @@ def write_corpus(out_dir: Path, cfg: Mapping[str, Any], force: bool = False) -> 
             "episode_statuses",
             "episode_count",
             "reconstructions",
+            # M4 起：生成层事实（骨架数 / 逐 episode 结论与原因 / 候选断言条数 / 证据锚点）
+            "generated",
         ],
         "pending_facts": {
-            "generated_tests": "M4：pytest 骨架生成落地后由 bench 对账生成内容",
             "red_green": "M5：RED/GREEN 双验证落地后由 bench 对账退出码",
         },
         "repo_fixtures": repo_files,
