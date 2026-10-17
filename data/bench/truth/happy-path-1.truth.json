@@ -30,6 +30,17 @@
   ],
   "expect_episodes": 1,
   "expect_filter_reasons": [],
+  "expect_reconstructions": [
+    {
+      "after": "def format_amount(value):\n    return abs(value)\n",
+      "before": "def format_amount(value):\n    return value\n",
+      "confidence": "medium",
+      "file": "/demo/beta/pkg/format.py",
+      "hunk_count": 1,
+      "source": "codex_unified_diff",
+      "status": "ok"
+    }
+  ],
   "input_file": "codex/happy-path-1.jsonl",
   "sample": "happy-path-1",
   "session_id": "sess-demo-0001"

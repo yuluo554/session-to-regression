@@ -9,10 +9,11 @@
 > 痛点来自公开抱怨：coding agent 常常「让测试变绿」而不是「让代码变对」，甚至把上周的修复改回去
 > （HN item 49981230，2026-10-06）。修复是一次性的，回归是永久的——本工具把每一次修复钉成回归测试。
 
-**状态（2026-10-17）**：**M1（双 harness 读取器）+ M2（episode 切分）已交付**——读本机日志、
-按 `payload.type` 归一事件流、切出"报 bug → 失败 → 改文件"的 episode 并确定性打分过滤，
-合成语料基准逐字段对账（含 episode 层）。
-**M3–M5 尚未实现**：`reconstruct` / `generate` / `verify` / `run` 现在只报 `stage_not_ready` 并退出 4，
+**状态（2026-10-17）**：**M1（双 harness 读取器）+ M2（episode 切分）+ M3（差分还原）已交付**——
+读本机日志、按 `payload.type` 归一事件流、切出"报 bug → 失败 → 改文件"的 episode 并确定性打分过滤、
+再把每次修复的 before/after 从日志里还原出来（三级降级 + 逐文件置信度）。合成语料基准逐字段对账
+（含 episode 层与**还原层**：before/after 逐字符比对）。
+**M4–M5 尚未实现**：`generate` / `verify` / `run` 现在只报 `stage_not_ready` 并退出 4，
 **不产出任何结果**（也不伪造空结果）。未交付能力不会出现在本文档的"可用命令"里。
 
 ---
@@ -41,16 +42,35 @@ s2r scan data/bench/claude --out events.json
 #   → events.json 里含 events[] 与 episodes[]（分数拆分 / 状态 / 证据锚点 / 丢弃原因）
 s2r scan ~/.claude/projects --out real.json     # 真实日志只读（整目录扫描按件隔离）
 
-# 合成基准对账（真值逐字段比对，含 episode 层；退出码即结论）
+# M3：把每个改动文件的 before/after 还原出来（logs-only，不依赖 git）
+s2r reconstruct data/bench/claude/multi-bug-1.jsonl --out rec.json
+#   → rec.json 里含 files[]（逐文件 before/after/hunks/source/confidence/status）与 episodes[]
+s2r reconstruct claude:<session_id> --claude-root ~/.claude/projects      # 按会话引用定位
+s2r reconstruct data/bench/codex/happy-path-1.jsonl --repo data/bench/repo/happy-path-1
+#   → Codex 侧日志里没有 before 全文，全文基线只能来自磁盘（--repo 是显式开关，只读）
+
+# 合成基准对账（真值逐字段比对，含 episode 层与还原层；退出码即结论）
 s2r bench
-s2r bench --probe drop-episode       # 探活：注入缺陷，基准必须报未达标
+s2r bench --probe swap-before-after  # 探活：把 before/after 调换，基准必须报未达标
 python tools/gen_bench.py --check    # 语料再生成位级一致（冻结物未被手改）
 ```
 
 `s2r scan` 读真实的 `~/.claude/projects/**/*.jsonl` 与 `~/.codex/sessions/**/*.jsonl`，也用
 `--claude-root DIR` / `--codex-root DIR` / 环境变量 `S2R_CLAUDE_ROOT`、`S2R_CODEX_ROOT` 覆盖路径
 （**不硬编码用户名**；找不到源显式报错，不伪造空结果）。事件流不复制大文本：`originalFile` /
-`structuredPatch` / `apply_patch` 全文只留**引用**（`seq` = 源文件行号），原文可按需回溯。
+`structuredPatch` / `apply_patch` 全文只留**引用**（`seq` = 源文件行号），原文由 `reconstruct` 按需回溯。
+
+`s2r reconstruct` 是**三级降级**的还原器：① Claude `originalFile` + 非空 `structuredPatch` →
+② Claude `old_string`/`new_string` 在 before 基线上定位替换 → ③ Codex `FileChange.unified_diff`
+（`*** Begin Patch` 文本作兜底）→ ④ 都不可得就如实记 `no_before_image`。三条纪律：
+
+* **不任选**：多处命中且无法唯一定位 → `unresolved`（`replace_all` 时全替换才是明确语义）；
+* **不伪造**：拿不到全文基线时落 `partial`（只给日志里真实出现的行），绝不编上下文行；
+* **只读**：`--repo` 是磁盘对齐的显式开关（语义 = "该编辑发生前的磁盘状态"），不给就不碰工作区，
+  给了也只读、对不上就降级。
+
+`confidence` 由**before 镜像的来源**决定而非结果好坏：日志内全文 = `high`、磁盘工作区 = `medium`、
+只有片段 = `low`、取不到 = `none`。
 
 `selftest` 是可证伪的：把 `--config` 指向一个写坏的 TOML 会 **exit 1**；指向不存在的路径会 **exit 2**。
 
@@ -58,11 +78,11 @@ python tools/gen_bench.py --check    # 语料再生成位级一致（冻结物�
 
 | 退出码 | 语义 |
 |---|---|
-| 0 | 成功；对 `run` / `verify` 表示「至少一条 verified」 |
-| 1 | 未达标：无 verified（含全部 unverified）、基准未达标、`scan` 读到文件但零事件、`selftest` 自检失败 |
+| 0 | 成功；对 `run` / `verify` 表示「至少一条 verified」；对 `reconstruct` 表示「至少一个文件给出完整 before/after」 |
+| 1 | 未达标：无 verified（含全部 unverified）、基准未达标、`scan` 读到文件但零事件、`selftest` 自检失败、`reconstruct` 一个完整 before/after 都没有（全为片段/无法定位/无 before 镜像） |
 | 2 | 用法错误或输入不可用：未知子命令、参数错误、路径不存在、未知日志格式（`unsupported_format`） |
 | 3 | 运行依赖缺失（如 pytest 不可用）——**不会**退化成「零条结果 + exit 0」 |
-| 4 | 阶段未就绪：该子命令所属模块尚未交付（当前仅 `reconstruct` / `generate` / `verify` / `run`；随里程碑整项退役） |
+| 4 | 阶段未就绪：该子命令所属模块尚未交付（当前仅 `generate` / `verify` / `run`；随里程碑整项退役） |
 
 判断"跑挂了"与"按契约返回非 0"的区别：以本表为准，非 0 不必然是故障
 （例如将来 `run` 检出全部 `unverified` 时返回 1 是既定语义）。
@@ -89,19 +109,25 @@ python tools/gen_bench.py --check    # 语料再生成位级一致（冻结物�
 
 基准与回归**一律使用合成会话日志**（假项目名/假路径/假 session id；白名单见 `data/README.md` §三），
 真实日志只在本机演示、不入仓。语料由 `tools/gen_bench.py`（实现随包在 `s2r.benchdata`）程序化生成，
-**生成时同步写出真值**（应切 episode 类型、before/after、RED/GREEN 期望）；真值里只存"输入与期望"，
-不允许出现观测类字段。
+**生成时同步写出真值**（应切 episode 类型、每个文件的 before/after 与还原来源/置信度、RED/GREEN 期望）；
+真值里只存"输入与期望"，不允许出现观测类字段。
 
-覆盖 8 类样本：正常修复链、未观察到通过、一会话多 bug、无失败信号、只改文档、多重定位、
-纯新建文件、未知格式（放在 `invalid/`，必须被拒绝）。门槛（每类最低条数、检出率下限、误报上限）
-随 `data/bench/manifest.json` 下发；`s2r bench` 同时核对**语料与真值的 sha256 台账**，
-冻结物被手改即红。
+覆盖 10 类样本：正常修复链、未观察到通过、一会话多 bug、无失败信号、只改文档、多重定位、
+纯新建文件、结构化补丁还原、磁盘基线对不上、未知格式（放在 `invalid/`，必须被拒绝）。
+门槛（每类最低条数、检出率下限、误报上限）随 `data/bench/manifest.json` 下发；`s2r bench` 同时核对
+**语料、真值与磁盘基线夹具的 sha256 台账**，冻结物被手改即红。`--probe` 是探活：向对账路径注入
+已知缺陷（含"把 before 换成 after"）并要求基准报未达标——0 表示缺陷被检出、1 表示基准失灵。
 
 ## 首期范围与已知限制
 
 * **只固化已发生的修复**，不替用户补覆盖率、不凭空设计新功能测试；
 * **首期只生成 Python 测试**：`.mjs` / `.ts` 的修复只识别、只进 manifest，不生成测试文件；
 * **不依赖 git**：git 只作为可选的回放加速手段，缺 git 时全链路仍可跑；
+* **Codex 侧的全文 before 只能来自磁盘基线**：实测其日志只给 `unified_diff`（修改）或 `content`
+  （新增），没有"修改前全文"通道——所以 Codex 的 before/after 需要 `--repo` 指向编辑前的工作区；
+  给不出就落 `partial`（片段级证据），**不伪造上下文行**；
+* **`--repo` 是"当时"的磁盘状态**：工具不做时序推断。指到当前工作区（会话已被应用）时，通常是
+  hunk 对不上 → 如实降级为 `partial`，不会把 after 当成 before 交出去；
 * **样本量诚实声明**：本机严格口径的真实端到端样本仅 5 个会话（宽松 29 个），
   不足以支撑统计型结论——因此**基准与回归一律使用合成会话 + 程序化植入真值**，
   真实样本只作演示与人工抽验，样本数不作交付承诺；

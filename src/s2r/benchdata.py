@@ -67,6 +67,9 @@ MIN_COUNT_BY_TYPE = {
     "doc_only": 1,
     "ambiguous_old_string": 1,
     "new_file_write": 1,
+    # M3 起：还原降级路径各有具名样本（① 结构化补丁 / ③ 磁盘基线对不上）
+    "structured_patch": 1,
+    "base_drift": 1,
     "unsupported_format": 1,
 }
 
@@ -227,6 +230,45 @@ class Builder:
         kind = record.pop("type")
         return self._claude_line(kind, **record)
 
+    def claude_edit_pair(
+        self,
+        tool_use_id: str,
+        file_path: str,
+        old_string: str,
+        new_string: str,
+        original_file: Optional[str],
+        hunk_lines: Optional[Sequence[str]] = None,
+        replace_all: bool = False,
+        old_start: int = 1,
+        result_type: Optional[str] = None,
+    ) -> None:
+        """一次 `Edit`：调用侧（`old_string`/`new_string`）+ 结果侧（`originalFile` / `structuredPatch`）。
+
+        `hunk_lines` 传 None → `structuredPatch: []`（**空表**，K14：新建/无 hunk 的结果实测就是空表）；
+        传正文则按前缀自动算 `oldLines`/`newLines`——避免手写计数与正文漂移。
+        """
+        self.claude_tool_call(
+            "Edit",
+            {"file_path": file_path, "old_string": old_string, "new_string": new_string, "replace_all": replace_all},
+            path=file_path,
+            tool_use_id=tool_use_id,
+        )
+        meta: Dict[str, Any] = {"filePath": file_path}
+        if original_file is not None:
+            meta["originalFile"] = original_file
+        if hunk_lines:
+            lines = list(hunk_lines)
+            old_lines = [item for item in lines if item[:1] in (" ", "-")]
+            new_lines = [item for item in lines if item[:1] in (" ", "+")]
+            meta["structuredPatch"] = [
+                {"oldStart": old_start, "oldLines": len(old_lines), "newStart": old_start, "newLines": len(new_lines), "lines": lines}
+            ]
+        else:
+            meta["structuredPatch"] = []
+        if result_type is not None:
+            meta["type"] = result_type
+        self.claude_tool_result(tool_use_id, "The file has been updated.", meta)
+
     # ---- Codex ------------------------------------------------------------ #
     def _codex_line(self, line_type: str, payload: Mapping[str, Any]) -> Mapping[str, Any]:
         self.index += 1
@@ -321,11 +363,54 @@ BETA_FORMAT = "/demo/beta/pkg/format.py"
 DOC_TARGET = "/demo/alpha/docs/notes.md"
 NEW_FILE = "/demo/alpha/src/helper.py"
 
+#: M3 还原事实的构造侧声明（状态/来源/置信度的**枚举名**由 `s2r.reconstruct` 定义；
+#: 这里刻意写字面量而不是 import 它——真值必须能由本模块独立复算，不依赖被测实现）
+#: 状态：ok（before/after 齐） / partial（只有片段） / unresolved（不任选） / no_before_image（无 before）
+#: 来源：claude_structured_patch / claude_old_string / claude_write_content /
+#:       codex_unified_diff / codex_file_change_content / codex_patch_text
+#: 置信度：high（日志内全文）/ medium（磁盘基线）/ low（片段）/ none（取不到）
+
+
+def expect_rec(
+    file: str,
+    before: Optional[str],
+    after: Optional[str],
+    status: str,
+    source: str,
+    confidence: str,
+    hunk_count: int = 1,
+) -> Dict[str, Any]:
+    """声明"这个文件的还原结果应该是什么"（逐文件对账用的事实子集）。"""
+    return {
+        "file": file,
+        "status": status,
+        "source": source,
+        "confidence": confidence,
+        "before": before,
+        "after": after,
+        "hunk_count": hunk_count,
+    }
+
+
+#: 磁盘基线夹具：样本名 → {仓库内相对路径: 全文}。
+#: 为什么需要（实测事实，`data/README.md` §6.7）：Codex 侧日志里**没有 before 全文**——
+#: `FileChange` 只给 `unified_diff`（修改）或 `content`（新增），`apply_patch` 只给 patch 文本；
+#: 全文基线只能来自"该编辑发生前的工作区"。基准把这份"当时的磁盘状态"一并冻结，
+#: 才能对 Codex 侧的 before/after 做逐字符对账；`base-drift-1` 刻意给一份**对不上**的基线，
+#: 用来锁住"磁盘已被改动 → 如实降级"这条纪律。
+REPO_FIXTURES: Dict[str, Dict[str, str]] = {
+    "happy-path-1": {"demo/beta/pkg/format.py": "def format_amount(value):\n    return value\n"},
+    "ended-without-pass-1": {"demo/alpha/src/calc.py": "def first(items):\n    return items[0]\n"},
+    "base-drift-1": {"demo/alpha/src/calc.py": "def first(items):\n    return items[-1]\n"},
+}
+
 
 def sample_happy_path(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) -> Tuple[Builder, Dict[str, Any]]:
     """正常修复链：报 bug → 测试失败 → 改代码 → 测试通过（Claude 侧）；Codex 侧同型。"""
     if rng.below(2) == 0:
-        # Claude 变体
+        # Claude 变体：① 路径（`originalFile` + 非空 `structuredPatch`）
+        before = "def divide(a, b):\n    return a / b\n"
+        after = "def divide(a, b):\n    return a / b if b else 0\n"
         builder = Builder("claude", session_id, cfg, rng)
         builder.claude_meta_line()
         builder.claude_user_message(builder.bug_report("divide() returns wrong value"))
@@ -338,29 +423,50 @@ def sample_happy_path(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) 
             {
                 "type": None,
                 "filePath": ALPHA_CALC,
-                "originalFile": "def divide(a, b):\n    return a / b\n",
+                "originalFile": before,
                 "structuredPatch": [{"oldStart": 1, "oldLines": 2, "newStart": 1, "newLines": 2, "lines": [" def divide(a, b):", "-    return a / b", "+    return a / b if b else 0"]}],
             },
         )
         builder.claude_tool_call("Bash", {"command": "python -m pytest tests/test_calc.py -q"}, tool_use_id="toolu-happy-run2")
         builder.claude_tool_result("toolu-happy-run2", builder.passing_output(0))
-    else:
-        builder = Builder("codex", session_id, cfg, rng)
-        builder.codex_session_meta()
-        builder.codex_message("user", builder.bug_report("format_amount() drops the sign"))
-        builder.codex_command("python -m pytest tests/test_format.py -q", "call-happy-run1")
-        builder.codex_command_output("call-happy-run1", builder.failure_output(1), 1)
-        patch = "*** Begin Patch\n*** Update File: {}\n@@\n-    return value\n+    return abs(value)\n*** End Patch".format(BETA_FORMAT)
-        builder.codex_apply_patch("call-happy-patch", patch, [BETA_FORMAT], "")
-        builder.codex_patch_output("call-happy-patch", "Exit code: 0\nWall time: 0 seconds\nOutput:\nSuccess. Updated the following files:\nM {}\n".format(BETA_FORMAT))
-        builder.codex_file_change({BETA_FORMAT: {"type": "update", "unified_diff": "@@ -1 +1 @@\n-    return value\n+    return abs(value)\n"}})
-        builder.codex_command("python -m pytest tests/test_format.py -q", "call-happy-run2")
-        builder.codex_command_output("call-happy-run2", builder.passing_output(0), 0)
-    return builder, {"type": "happy_path", "expect_episodes": 1, "expect_episode_statuses": ["verified_by_run"], "expect_filter_reasons": []}
+        return builder, {
+            "type": "happy_path",
+            "expect_episodes": 1,
+            "expect_episode_statuses": ["verified_by_run"],
+            "expect_filter_reasons": [],
+            "expect_reconstructions": [expect_rec(ALPHA_CALC, before, after, "ok", "claude_structured_patch", "high", 1)],
+        }
+    # Codex 变体：③ 路径（首选 `FileChange.unified_diff`，同文件的 patch 文本作兜底）
+    before = "def format_amount(value):\n    return value\n"
+    after = "def format_amount(value):\n    return abs(value)\n"
+    builder = Builder("codex", session_id, cfg, rng)
+    builder.codex_session_meta()
+    builder.codex_message("user", builder.bug_report("format_amount() drops the sign"))
+    builder.codex_command("python -m pytest tests/test_format.py -q", "call-happy-run1")
+    builder.codex_command_output("call-happy-run1", builder.failure_output(1), 1)
+    patch = "*** Begin Patch\n*** Update File: {}\n@@\n-    return value\n+    return abs(value)\n*** End Patch".format(BETA_FORMAT)
+    builder.codex_apply_patch("call-happy-patch", patch, [BETA_FORMAT], "")
+    builder.codex_patch_output("call-happy-patch", "Exit code: 0\nWall time: 0 seconds\nOutput:\nSuccess. Updated the following files:\nM {}\n".format(BETA_FORMAT))
+    builder.codex_file_change({BETA_FORMAT: {"type": "update", "unified_diff": "@@ -1,2 +1,2 @@\n def format_amount(value):\n-    return value\n+    return abs(value)\n"}})
+    builder.codex_command("python -m pytest tests/test_format.py -q", "call-happy-run2")
+    builder.codex_command_output("call-happy-run2", builder.passing_output(0), 0)
+    return builder, {
+        "type": "happy_path",
+        "expect_episodes": 1,
+        "expect_episode_statuses": ["verified_by_run"],
+        "expect_filter_reasons": [],
+        "expect_reconstructions": [expect_rec(BETA_FORMAT, before, after, "ok", "codex_unified_diff", "medium", 1)],
+    }
 
 
 def sample_ended_without_pass(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) -> Tuple[Builder, Dict[str, Any]]:
-    """修复后会话结束、未观察到通过（终点应为 ended_without_pass）。"""
+    """修复后会话结束、未观察到通过（终点应为 ended_without_pass）。
+
+    M3 起同时是 ③ 路径的兜底样例：本会话**没有** `FileChange` 通道，只有 `apply_patch` 文本
+    （patch 文本不带行号，全文基线来自配套的磁盘夹具 `repo/ended-without-pass-1/`）。
+    """
+    before = "def first(items):\n    return items[0]\n"
+    after = "def first(items):\n    return items[0] if items else None\n"
     builder = Builder("codex", session_id, cfg, rng)
     builder.codex_session_meta()
     builder.codex_message("developer", "<demo developer instructions>")
@@ -370,11 +476,20 @@ def sample_ended_without_pass(rng: Splitmix64, cfg: Mapping[str, Any], session_i
     patch = "*** Begin Patch\n*** Update File: {}\n@@\n-    return items[0]\n+    return items[0] if items else None\n*** End Patch".format(ALPHA_CALC)
     builder.codex_apply_patch("call-eop-patch", patch, [ALPHA_CALC], "")
     builder.codex_patch_output("call-eop-patch", "Exit code: 0\nWall time: 0 seconds\nOutput:\nSuccess. Updated the following files:\nM {}\n".format(ALPHA_CALC))
-    return builder, {"type": "ended_without_pass", "expect_episodes": 1, "expect_episode_statuses": ["ended_without_pass"], "expect_filter_reasons": []}
+    return builder, {
+        "type": "ended_without_pass",
+        "expect_episodes": 1,
+        "expect_episode_statuses": ["ended_without_pass"],
+        "expect_filter_reasons": [],
+        "expect_reconstructions": [expect_rec(ALPHA_CALC, before, after, "ok", "codex_patch_text", "medium", 1)],
+    }
 
 
 def sample_multi_bug(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) -> Tuple[Builder, Dict[str, Any]]:
-    """一个会话两次修复（M2 应切出两个 episode，episode_id 不撞）。"""
+    """一个会话两次修复（M2 应切出两个 episode，episode_id 不撞）。
+
+    两处修复都只有 `old_string` + `originalFile`（`structuredPatch` 是**空表**）→ M3 走 ② 路径。
+    """
     builder = Builder("claude", session_id, cfg, rng)
     builder.claude_user_message(builder.bug_report("divide() returns wrong value"))
     builder.claude_tool_call("Bash", {"command": "python -m pytest tests/test_calc.py -q"}, tool_use_id="toolu-multi-run1")
@@ -388,17 +503,35 @@ def sample_multi_bug(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) -
     builder.claude_tool_result("toolu-multi-edit2", "The file has been updated.", {"filePath": BETA_FORMAT, "originalFile": "def slugify(name):\n    return name\n", "structuredPatch": []})
     builder.claude_tool_call("Bash", {"command": "python -m pytest tests/test_slug.py -q"}, tool_use_id="toolu-multi-run3")
     builder.claude_tool_result("toolu-multi-run3", builder.passing_output(0))
-    return builder, {"type": "multi_bug", "expect_episodes": 2, "expect_episode_statuses": ["ended_without_pass", "verified_by_run"], "expect_filter_reasons": []}
+    return builder, {
+        "type": "multi_bug",
+        "expect_episodes": 2,
+        "expect_episode_statuses": ["ended_without_pass", "verified_by_run"],
+        "expect_filter_reasons": [],
+        "expect_reconstructions": [
+            expect_rec(ALPHA_CALC, "def divide(a, b):\n    return a / b\n", "def divide(a, b):\n    return a / b if b else 0\n", "ok", "claude_old_string", "high", 1),
+            expect_rec(BETA_FORMAT, "def slugify(name):\n    return name\n", "def slugify(name):\n    return name.lower()\n", "ok", "claude_old_string", "high", 1),
+        ],
+    }
 
 
 def sample_no_failure_signal(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) -> Tuple[Builder, Dict[str, Any]]:
-    """用户报 bug 但日志内无失败输出（打分低 → 应被过滤，不得切为 episode）。"""
+    """用户报 bug 但日志内无失败输出（打分低 → 应被过滤，不得切为 episode）。
+
+    本会话一次文件都没改 → 还原面必须为空（**空集也是一种断言**：不许凭空产出还原结果）。
+    """
     builder = Builder("claude", session_id, cfg, rng)
     builder.claude_user_message(builder.bug_report("the CSV export looks wrong"))
     builder.claude_assistant_message("Let me look at the exporter first.")
     builder.claude_tool_call("Read", {"file_path": BETA_FORMAT}, path=BETA_FORMAT, tool_use_id="toolu-nofail-read")
     builder.claude_tool_result("toolu-nofail-read", "def format_amount(value):\n    return value\n")
-    return builder, {"type": "no_failure_signal", "expect_episodes": 0, "expect_episode_statuses": [], "expect_filter_reasons": ["no_failure_evidence"]}
+    return builder, {
+        "type": "no_failure_signal",
+        "expect_episodes": 0,
+        "expect_episode_statuses": [],
+        "expect_filter_reasons": ["no_failure_evidence"],
+        "expect_reconstructions": [],
+    }
 
 
 def sample_doc_only(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) -> Tuple[Builder, Dict[str, Any]]:
@@ -409,26 +542,35 @@ def sample_doc_only(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) ->
     builder.claude_tool_result("toolu-doc-run", builder.failure_output(1))
     builder.claude_tool_call("Edit", {"file_path": DOC_TARGET, "old_string": "run it", "new_string": "run it with --demo", "replace_all": False}, path=DOC_TARGET, tool_use_id="toolu-doc-edit")
     builder.claude_tool_result("toolu-doc-edit", "The file has been updated.", {"filePath": DOC_TARGET, "originalFile": "run it\n", "structuredPatch": []})
-    return builder, {"type": "doc_only", "expect_episodes": 0, "expect_episode_statuses": [], "expect_filter_reasons": ["docs_only"]}
+    return builder, {
+        "type": "doc_only",
+        "expect_episodes": 0,
+        "expect_episode_statuses": [],
+        "expect_filter_reasons": ["docs_only"],
+        "expect_reconstructions": [expect_rec(DOC_TARGET, "run it\n", "run it with --demo\n", "ok", "claude_old_string", "high", 1)],
+    }
 
 
 def sample_ambiguous_old_string(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) -> Tuple[Builder, Dict[str, Any]]:
-    """old_string 在原文件里出现多次（M3 必须标 unresolved，不得任选一处）。"""
+    """`old_string` 在原文件里出现多次 → M3 必须标 `unresolved`（**不得任选一处**）。
+
+    构造要点：结果侧只给 `originalFile`（before 镜像**可得**）、`structuredPatch` 是**空表**
+    ——于是 ① 级不成立（K14：空表不含 diff），判定落到 ② 级；而 `old_string` 在原文件里
+    命中 **2** 处、`replace_all` 为 false → 无法唯一定位，必须如实落 `unresolved`。
+    """
+    before = "def a(value):\n    return value\n\n\ndef b(value):\n    return value\n"
     builder = Builder("claude", session_id, cfg, rng)
     builder.claude_user_message(builder.bug_report("rounding is applied twice"))
     builder.claude_tool_call("Bash", {"command": "python -m pytest tests/test_calc.py -q"}, tool_use_id="toolu-amb-run")
     builder.claude_tool_result("toolu-amb-run", builder.failure_output(1))
-    builder.claude_tool_call("Edit", {"file_path": ALPHA_CALC, "old_string": "    return value", "new_string": "    return round(value, 2)", "replace_all": False}, path=ALPHA_CALC, tool_use_id="toolu-amb-edit")
-    builder.claude_tool_result(
-        "toolu-amb-edit",
-        "The file has been updated.",
-        {
-            "filePath": ALPHA_CALC,
-            "originalFile": "def a(value):\n    return value\n\n\ndef b(value):\n    return value\n",
-            "structuredPatch": [{"oldStart": 2, "oldLines": 1, "newStart": 2, "newLines": 1, "lines": ["-    return value", "+    return round(value, 2)"]}],
-        },
-    )
-    return builder, {"type": "ambiguous_old_string", "expect_episodes": 1, "expect_episode_statuses": ["ended_without_pass"], "expect_filter_reasons": []}
+    builder.claude_edit_pair("toolu-amb-edit", ALPHA_CALC, "    return value", "    return round(value, 2)", before, hunk_lines=None)
+    return builder, {
+        "type": "ambiguous_old_string",
+        "expect_episodes": 1,
+        "expect_episode_statuses": ["ended_without_pass"],
+        "expect_filter_reasons": [],
+        "expect_reconstructions": [expect_rec(ALPHA_CALC, None, None, "unresolved", "claude_old_string", "none", 0)],
+    }
 
 
 def sample_new_file_write(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) -> Tuple[Builder, Dict[str, Any]]:
@@ -437,6 +579,7 @@ def sample_new_file_write(rng: Splitmix64, cfg: Mapping[str, Any], session_id: s
     这是一条**应被保留**的 episode（分数够），题目在 M3：还原器必须如实记
     `no_before_image`，而不是硬造一个 before。首版样本没有失败信号，于是它只验证了
     "无失败证据即丢弃"，压根没走到"无 before 镜像"这条路径（M2 复核时补上）。
+    新建文件的 `after` 是**可知**的（`Write.content`= 新全文），只是 `before` 不存在。
     """
     builder = Builder("claude", session_id, cfg, rng)
     builder.claude_user_message(builder.bug_report("need a helper for formatting"))
@@ -458,7 +601,66 @@ def sample_new_file_write(rng: Splitmix64, cfg: Mapping[str, Any], session_id: s
         "expect_episodes": 1,
         "expect_episode_statuses": ["ended_without_pass"],
         "expect_filter_reasons": [],
+        "expect_reconstructions": [expect_rec(NEW_FILE, None, "def helper(value):\n    return value\n", "no_before_image", "claude_write_content", "none", 0)],
     }
+
+
+def sample_structured_patch(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) -> Tuple[Builder, Dict[str, Any]]:
+    """① 路径具名样本：`originalFile`（修改前全文）+ **非空** `structuredPatch`（带 hunk）。
+
+    非空判据是 K14 的**实测**结论：新建文件的结果同样带 `structuredPatch: []`（82 条空表），
+    只看"键存在"会把纯新建也算成有 diff 证据。所以本样本的 hunk 必须真有内容行，
+    且行号（`oldStart`）与 `originalFile` 对得上——对不上就该落 `unresolved`，不许硬套。
+    """
+    before = "def divide(a, b):\n    return a / b\n"
+    after = "def divide(a, b):\n    return a / b if b else 0\n"
+    builder = Builder("claude", session_id, cfg, rng)
+    builder.claude_user_message(builder.bug_report("divide() raises on an empty denominator"))
+    builder.claude_tool_call("Bash", {"command": "python -m pytest tests/test_calc.py -q"}, tool_use_id="toolu-sp-run1")
+    builder.claude_tool_result("toolu-sp-run1", builder.failure_output(1, "ZeroDivisionError: division by zero"))
+    builder.claude_edit_pair(
+        "toolu-sp-edit",
+        ALPHA_CALC,
+        "    return a / b",
+        "    return a / b if b else 0",
+        before,
+        hunk_lines=[" def divide(a, b):", "-    return a / b", "+    return a / b if b else 0"],
+        old_start=1,
+    )
+    builder.claude_tool_call("Bash", {"command": "python -m pytest tests/test_calc.py -q"}, tool_use_id="toolu-sp-run2")
+    builder.claude_tool_result("toolu-sp-run2", builder.passing_output(0))
+    return builder, {
+        "type": "structured_patch",
+        "expect_episodes": 1,
+        "expect_episode_statuses": ["verified_by_run"],
+        "expect_filter_reasons": [],
+        "expect_reconstructions": [expect_rec(ALPHA_CALC, before, after, "ok", "claude_structured_patch", "high", 1)],
+    }
+
+
+def sample_base_drift(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) -> Tuple[Builder, Dict[str, Any]]:
+    """磁盘基线与 patch **对不上**（工作区已被改动）→ 如实降级为 `partial`，绝不硬套。
+
+    判据来自 K11/纪律"磁盘文件已被改动导致无法对齐时如实降级"：patch 的旧侧行在磁盘基线里
+    找不到 → 我们仍然知道"改了什么片段"（hunks 来自日志），但拿不到全文 before/after，
+    于是 `before`/`after` 为 null、`confidence` = low，**不伪造上下文行**。
+    """
+    builder = Builder("codex", session_id, cfg, rng)
+    builder.codex_session_meta()
+    builder.codex_message("user", builder.bug_report("cli returns the wrong item"))
+    builder.codex_command("python -m pytest tests/test_cli.py -q", "call-drift-run1")
+    builder.codex_command_output("call-drift-run1", builder.failure_output(1, "IndexError: list index out of range"), 1)
+    patch = "*** Begin Patch\n*** Update File: {}\n@@\n-    return items[0]\n+    return items[0] if items else None\n*** End Patch".format(ALPHA_CALC)
+    builder.codex_apply_patch("call-drift-patch", patch, [ALPHA_CALC], "")
+    builder.codex_patch_output("call-drift-patch", "Exit code: 0\nWall time: 0 seconds\nOutput:\nSuccess. Updated the following files:\nM {}\n".format(ALPHA_CALC))
+    return builder, {
+        "type": "base_drift",
+        "expect_episodes": 1,
+        "expect_episode_statuses": ["ended_without_pass"],
+        "expect_filter_reasons": [],
+        "expect_reconstructions": [expect_rec(ALPHA_CALC, None, None, "partial", "codex_patch_text", "low", 1)],
+    }
+
 
 def sample_unsupported_format(rng: Splitmix64, cfg: Mapping[str, Any], session_id: str) -> Tuple[Builder, Dict[str, Any]]:
     """未知格式：读取器必须显式报 unsupported_format（不得静默产出空事件流）。"""
@@ -477,6 +679,9 @@ SAMPLE_BUILDERS = (
     ("ambiguous-old-string-1", sample_ambiguous_old_string),
     ("new-file-write-1", sample_new_file_write),
     ("unsupported-format-1", sample_unsupported_format),
+    # M3 新增样本**追加在末尾**：前面样本的 session id 与 RNG 抽样序列因此保持不变
+    ("structured-patch-1", sample_structured_patch),
+    ("base-drift-1", sample_base_drift),
 )
 
 
@@ -550,10 +755,11 @@ def write_corpus(out_dir: Path, cfg: Mapping[str, Any], force: bool = False) -> 
             )
         shutil.rmtree(str(out_dir))
     samples, draws = build_corpus(cfg)
-    for folder in ("claude", "codex", "invalid", "truth"):
+    for folder in ("claude", "codex", "invalid", "truth", "repo"):
         (out_dir / folder).mkdir(parents=True, exist_ok=True)
 
     manifest_samples: List[Dict[str, Any]] = []
+    repo_files: List[Dict[str, Any]] = []
     type_counts: Dict[str, int] = {}
     total_exit_codes = 0
     for name, session_id, builder, meta in samples:
@@ -567,6 +773,20 @@ def write_corpus(out_dir: Path, cfg: Mapping[str, Any], force: bool = False) -> 
         target = out_dir / relative
         target.write_bytes(payload)
 
+        # 磁盘基线夹具（"该编辑发生前的工作区"）：Codex 侧的全文 before 只能来自这里
+        for fixture_relative, fixture_text in sorted(REPO_FIXTURES.get(name, {}).items()):
+            fixture_path = out_dir / "repo" / name / fixture_relative
+            fixture_path.parent.mkdir(parents=True, exist_ok=True)
+            fixture_bytes = fixture_text.replace("\r\n", "\n").encode("utf-8")
+            fixture_path.write_bytes(fixture_bytes)
+            repo_files.append(
+                {
+                    "sample": name,
+                    "file": str(Path("repo") / name / fixture_relative).replace("\\", "/"),
+                    "sha256": serialize.sha256_bytes(fixture_bytes),
+                }
+            )
+
         truth = {
             "sample": name,
             "episode_type": meta["type"],
@@ -578,6 +798,9 @@ def write_corpus(out_dir: Path, cfg: Mapping[str, Any], force: bool = False) -> 
             "expect_episode_statuses": meta.get("expect_episode_statuses", []),
             "expect_filter_reasons": meta.get("expect_filter_reasons", []),
         }
+        # M3：还原层期望（逐文件 before/after / 状态 / 来源 / 置信度，同样由构造侧声明）
+        if "expect_reconstructions" in meta:
+            truth["expect_reconstructions"] = meta["expect_reconstructions"]
         if "expect_error" in meta:
             truth["expect_error"] = meta["expect_error"]
         truth_relative = "truth/{}.truth.json".format(name)
@@ -596,11 +819,12 @@ def write_corpus(out_dir: Path, cfg: Mapping[str, Any], force: bool = False) -> 
                 "sha256": serialize.sha256_bytes(payload),
                 "truth": truth_relative,
                 "truth_sha256": serialize.sha256_bytes(truth_bytes),
+                "repo": str(Path("repo") / name).replace("\\", "/") if REPO_FIXTURES.get(name) else "",
             }
         )
 
     manifest = {
-        "bench_version": 1,
+        "bench_version": 2,
         "generator": "tools/gen_bench.py",
         "seed": SEED,
         "rng_draws": draws,
@@ -626,12 +850,13 @@ def write_corpus(out_dir: Path, cfg: Mapping[str, Any], force: bool = False) -> 
             "filter_reasons",
             "episode_statuses",
             "episode_count",
+            "reconstructions",
         ],
         "pending_facts": {
-            "before_after": "M3：before/after 还原落地后由 bench 逐字符对账",
             "generated_tests": "M4：pytest 骨架生成落地后由 bench 对账生成内容",
             "red_green": "M5：RED/GREEN 双验证落地后由 bench 对账退出码",
         },
+        "repo_fixtures": repo_files,
         "privacy": {
             "whitelist": {key: list(value) if isinstance(value, tuple) else value for key, value in WHITELIST.items()},
             "note": "全部为假值；假绝对路径只保留通用盘符形态，后缀段为假项目名",

@@ -1,5 +1,5 @@
 {
-  "bench_version": 1,
+  "bench_version": 2,
   "checked_facts": [
     "source",
     "format_version",
@@ -11,27 +11,32 @@
     "user_report_fragments",
     "filter_reasons",
     "episode_statuses",
-    "episode_count"
+    "episode_count",
+    "reconstructions"
   ],
   "coverage": {
     "min_count_by_type": {
       "ambiguous_old_string": 1,
+      "base_drift": 1,
       "doc_only": 1,
       "ended_without_pass": 1,
       "happy_path": 1,
       "multi_bug": 1,
       "new_file_write": 1,
       "no_failure_signal": 1,
+      "structured_patch": 1,
       "unsupported_format": 1
     },
     "observed_count_by_type": {
       "ambiguous_old_string": 1,
+      "base_drift": 1,
       "doc_only": 1,
       "ended_without_pass": 1,
       "happy_path": 1,
       "multi_bug": 1,
       "new_file_write": 1,
       "no_failure_signal": 1,
+      "structured_patch": 1,
       "unsupported_format": 1
     }
   },
@@ -41,7 +46,6 @@
     "codex"
   ],
   "pending_facts": {
-    "before_after": "M3：before/after 还原落地后由 bench 逐字符对账",
     "generated_tests": "M4：pytest 骨架生成落地后由 bench 对账生成内容",
     "red_green": "M5：RED/GREEN 双验证落地后由 bench 对账退出码"
   },
@@ -62,93 +66,140 @@
       "user": "demo-user"
     }
   },
-  "rng_draws": 4,
+  "repo_fixtures": [
+    {
+      "file": "repo/happy-path-1/demo/beta/pkg/format.py",
+      "sample": "happy-path-1",
+      "sha256": "6b6b84e5fd8961f429f9d2cdbf7658cf33c25b4ff6c09c246c32e6c8b233419f"
+    },
+    {
+      "file": "repo/ended-without-pass-1/demo/alpha/src/calc.py",
+      "sample": "ended-without-pass-1",
+      "sha256": "c9f28bea98a2738fd61db45b1a927b35357a4a9a22303e1343450814dea7c632"
+    },
+    {
+      "file": "repo/base-drift-1/demo/alpha/src/calc.py",
+      "sample": "base-drift-1",
+      "sha256": "ad998671b9ce29bae9cafb6681bd2a45efe912cf33fcb053aa89890d0d785c2c"
+    }
+  ],
+  "rng_draws": 5,
   "samples": [
     {
-      "bytes": 3097,
+      "bytes": 3129,
       "episode_type": "happy_path",
       "file": "codex/happy-path-1.jsonl",
       "harness": "codex",
+      "repo": "repo/happy-path-1",
       "sample": "happy-path-1",
-      "sha256": "96f3ff5c99fe8b8815b6050beef872ca540b1d821bbfe305e47163ceba8cb84a",
+      "sha256": "fb340347e5e7f9c08dae03d679ec9b754e437a889c30b9219124f9b28a7934cb",
       "truth": "truth/happy-path-1.truth.json",
-      "truth_sha256": "787f691fc3b12a3aa118f5869a20cf0236b7e5232159e00b1033af65d316fc08"
+      "truth_sha256": "b6b7c57fd1a1cdbf87b9970c1f4f52b3687a5130a79ce7733da97ca4193d14e4"
     },
     {
       "bytes": 2320,
       "episode_type": "ended_without_pass",
       "file": "codex/ended-without-pass-1.jsonl",
       "harness": "codex",
+      "repo": "repo/ended-without-pass-1",
       "sample": "ended-without-pass-1",
       "sha256": "6009ddedf3374eca0d6ed2f175798ebf6762e0b3f959dea6f1757e853d4db062",
       "truth": "truth/ended-without-pass-1.truth.json",
-      "truth_sha256": "47a0f60f2ce3a3c7b2f4e8b3c36cd6fbef184b055acc8349b5ea19593806b7cd"
+      "truth_sha256": "c2df55ee8c34071686f722b00e888339c8181f3287b56bdf1061777bbb30643d"
     },
     {
       "bytes": 6164,
       "episode_type": "multi_bug",
       "file": "claude/multi-bug-1.jsonl",
       "harness": "claude",
+      "repo": "",
       "sample": "multi-bug-1",
       "sha256": "89f0d1e74d72ce39df5a61210cc41266cbe81782d333380c06617c95b54b80c9",
       "truth": "truth/multi-bug-1.truth.json",
-      "truth_sha256": "0d00893040b0789520e503a4efe71354818cc74617047a12a384c0a365bb2322"
+      "truth_sha256": "bac3fefc5dded788571a86c465451ed7c38748028d553036d4704c01c2c0d852"
     },
     {
       "bytes": 1720,
       "episode_type": "no_failure_signal",
       "file": "claude/no-failure-signal-1.jsonl",
       "harness": "claude",
+      "repo": "",
       "sample": "no-failure-signal-1",
       "sha256": "657fdeba912fbb80070c4779d599ecfbc54729af144a8a4070eae9cd3b2f0298",
       "truth": "truth/no-failure-signal-1.truth.json",
-      "truth_sha256": "5eb0349486034775e23d5b4d2cfe36739d9e046d8536b9280f1ea0e03c0791e4"
+      "truth_sha256": "b0bf8bb402241c7a506de02264c95de66edd6dd86b7e3c0a26dae6b311ae6ffd"
     },
     {
       "bytes": 2576,
       "episode_type": "doc_only",
       "file": "claude/doc-only-1.jsonl",
       "harness": "claude",
+      "repo": "",
       "sample": "doc-only-1",
       "sha256": "9691be1e64dd29ec54a154dfea012717b0926ce465d0852c27e728c92a31cb11",
       "truth": "truth/doc-only-1.truth.json",
-      "truth_sha256": "692acd36cc0ea1e0292613ea01d890e37f98c567d7afa4b2d088a7b8cefe58e6"
+      "truth_sha256": "5f083ef2d37f53c1992c6db92136a83b0f130d5d788ee677d15849a8adf1cb30"
     },
     {
-      "bytes": 2764,
+      "bytes": 2641,
       "episode_type": "ambiguous_old_string",
       "file": "claude/ambiguous-old-string-1.jsonl",
       "harness": "claude",
+      "repo": "",
       "sample": "ambiguous-old-string-1",
-      "sha256": "787be95f82d496ae1ed2338e2c706bcce9a04f727c4abb70c812d8d23c0e2ead",
+      "sha256": "e32807e614e17f8f7cf605bac18fdd9f2d85fc4f5960db810eb88819e41c2536",
       "truth": "truth/ambiguous-old-string-1.truth.json",
-      "truth_sha256": "050c2de21d862f4ed559900b15a6325ea680e7e5a30a3cbe4c3bca12e02d2b99"
+      "truth_sha256": "1daac5b43f59c5d326fe741ee58f86a756e5e3489c980984670fc6c9ea1f0e2f"
     },
     {
       "bytes": 2559,
       "episode_type": "new_file_write",
       "file": "claude/new-file-write-1.jsonl",
       "harness": "claude",
+      "repo": "",
       "sample": "new-file-write-1",
       "sha256": "c07ba05f3d9bfd3490803d3e026ab6bd1ffb5375da7d0bcc950fb453359205e4",
       "truth": "truth/new-file-write-1.truth.json",
-      "truth_sha256": "73b6dd39e238a12afc286e49de7880b55ae767e1d7540d4510a274b326a00ce5"
+      "truth_sha256": "ce4d181967ab51ca131cd4dbcf6189d2e4df8c17a196743dd6680867943bd965"
     },
     {
       "bytes": 146,
       "episode_type": "unsupported_format",
       "file": "invalid/unsupported-format-1.jsonl",
       "harness": "claude",
+      "repo": "",
       "sample": "unsupported-format-1",
       "sha256": "dd1c08957d9c6a17ab74c7f4608988d7998c99be78fb78a251ff2bdd4579396a",
       "truth": "truth/unsupported-format-1.truth.json",
       "truth_sha256": "ca4ee2a0360608ca6c4fb1f3dea7fc0e4d57efc011c3d258abe1b27996f44fa5"
+    },
+    {
+      "bytes": 3704,
+      "episode_type": "structured_patch",
+      "file": "claude/structured-patch-1.jsonl",
+      "harness": "claude",
+      "repo": "",
+      "sample": "structured-patch-1",
+      "sha256": "75298d2eabf102589d85b6eea4c080cd5b408425ba5f2d62ee35c5f84b4e94ea",
+      "truth": "truth/structured-patch-1.truth.json",
+      "truth_sha256": "007bb05771cbe82bdc70fb7677636b0e4e341476af736e5d2838ef5e15958ce6"
+    },
+    {
+      "bytes": 2095,
+      "episode_type": "base_drift",
+      "file": "codex/base-drift-1.jsonl",
+      "harness": "codex",
+      "repo": "repo/base-drift-1",
+      "sample": "base-drift-1",
+      "sha256": "7f4035be16870030f69117811318e5ad7664e93d8ff729266a3e660226707538",
+      "truth": "truth/base-drift-1.truth.json",
+      "truth_sha256": "4aa3756652799452e490b1bc3b706c1cec11b0e999f391be2dcefbf5a9659f6a"
     }
   ],
   "seed": 20261017,
   "thresholds": {
     "max_false_positive": 0,
     "min_detection_rate": 1.0,
-    "min_samples": 8
+    "min_samples": 10
   }
 }

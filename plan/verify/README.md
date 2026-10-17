@@ -184,3 +184,52 @@
 * **GitHub Actions 仍未运行**（未建远端）→ CI 结论一律"本地等价校验，未接远端，CI 待首推验证"。
 * 本轮新增等价物：双解释器 204 项、真实日志双源只读全量扫描、六探活、语料 `--check`、离线冒烟 20/20。
 * 缺口不变：四腿矩阵环境差异、CI 步骤接线、代理/网络差异。
+
+---
+
+## M3（2026-10-17）差分还原：三级降级 + 逐文件置信度 + 基准真对账
+
+### 1. 逐条命令与退出码语义（本机实跑）
+
+| # | 命令 | 退出码 | 语义判定 |
+|---|---|---|---|
+| 1 | `py -3.8 -X utf8 -m pytest -q` | 0 | ✅ 符合：**243 项通过**（M2 时 204） |
+| 2 | `py -3.12 -X utf8 -m pytest -q` | 0 | ✅ 符合：**243 项通过**（同收集数） |
+| 3 | `s2r reconstruct data/bench/claude/multi-bug-1.jsonl --out rec.json` | 0 | ✅ 符合：`claude/sess-demo-0003` → 2 个文件（完整 2）+ 2 个 episode；双跑 sha256 相同 |
+| 4 | `s2r reconstruct data/bench/claude/structured-patch-1.jsonl` | 0 | ✅ 符合：① 路径（`claude_structured_patch` / `high` / `aligned_by=line_number`） |
+| 5 | `s2r reconstruct data/bench/claude/ambiguous-old-string-1.jsonl` | 1 | ✅ 符合：`unresolved` + `ambiguous_match`（`occurrences=2`，**不产出** before/after） |
+| 6 | `s2r reconstruct data/bench/claude/new-file-write-1.jsonl` | 1 | ✅ 符合：`no_before_image`（after 取自 `Write.content`，before 为 null） |
+| 7 | `s2r reconstruct data/bench/codex/happy-path-1.jsonl` | 1 | ✅ 符合：无磁盘基线 → `partial`（片段，`before`/`after` 为 null） |
+| 8 | `s2r reconstruct … --repo data/bench/repo/happy-path-1` | 0 | ✅ 符合：`codex_unified_diff` / `medium` → before/after 与真值逐字符相同 |
+| 9 | `s2r reconstruct data/bench/claude/base-drift-1…`（同 7 的基线对不上形态） | 1 | ✅ 符合：语料 `base-drift-1` 走 `partial` + `base_mismatch`（磁盘已被改动，如实降级） |
+| 10 | `s2r reconstruct sess-demo-0001`（认不出的引用） | 2 | ✅ 符合：`input_unavailable` + 提示 `<source>:<session_id>` 或日志路径 |
+| 11 | `s2r reconstruct claude:sess-demo-0003 --claude-root <临时根>` | 0 | ✅ 符合：按会话 id 定位（只探测每份文件前 N 行） |
+| 12 | `s2r bench` | 0 | ✅ 符合：`ok`（检出 **10/10**、误报 0、台账含磁盘基线夹具）；`pending` 只剩 M4–M5 |
+| 13 | `s2r bench --probe <7 个探活>` | 0 ×7 | ✅ 符合：七个注入缺陷全部被检出（新增 `swap-before-after`） |
+| 14 | `python tools/gen_bench.py --check` | 0 | ✅ 符合：语料/真值/磁盘夹具再生成**逐字节一致**（10 样本，rng_draws=5） |
+| 15 | `python tools/ci_smoke.py`（已装包环境） | 0 | ✅ 符合：**20/20**（`reconstruct` 已退役 4 → 按真实语义 0，另加 bare/module 两形态） |
+| 16 | `python tools/fix_eol.py --check` | 0 | ✅ 符合：83 个文件 0 问题 |
+
+### 2. 变异验证（M3 新增/改写门，7 项全红）
+
+跑批脚本落在仓库树外（`%TEMP%/s2r-mutations/mutate.py`：备份 → 改 → 跑 → 还原 → 校验），
+一次性 7 项，逐项结果：
+
+| 变异 | 目标判据 | 结果 |
+|---|---|---|
+| 还原优先级写反（① 结构化补丁那条分支永不成立） | 优先级测试（① 与 ② 结论不同的构造） | RED ✅ |
+| 多处命中不再拒绝：任选第一处替换 | `unresolved` 判据 + 语料 | RED ✅ |
+| 空 `structuredPatch` 也算 diff（K14 退版为"键存在"） | 空表测试 + 语料（② 路径） | RED ✅ |
+| 探活注入被摘掉（`swap-before-after` 成永不触发的假门） | 探活检出测试 | RED ✅ |
+| 还原期望不再映射进对账面 | 逐文件差异点名测试 | RED ✅ |
+| 不给 `--repo` 也用当前工作目录兜底 | 磁盘读取显式开关测试（可证伪：基线就摆在 CWD 下） | RED ✅ |
+| hunk 定位多处命中时任选第一处 | `ambiguous_match` 判据 + 语料 | RED ✅ |
+
+### 3. 与 CI 的缺口（诚实标注）
+
+* **GitHub Actions 仍未运行**（未建远端）→ CI 结论一律"本地等价校验，未接远端，CI 待首推验证"。
+* 本轮新增等价物：双解释器 243 项、七探活、语料+真值+磁盘基线**三类冻结物**的台账 sha256、
+  `reconstruct` 的 bare/module 离线冒烟、EOL 门（83 文件）。
+* **新增缺口（本机测不了，显式待首推验证）**：① `data/bench/repo/**` 里的夹具文件名在大小写不敏感
+  文件系统（macOS/Windows）与敏感文件系统（Linux）上的行为差异；② Windows 盘符形态的磁盘候选路径
+  只在 Windows 腿上有意义（Linux 腿上走 POSIX 分支）。

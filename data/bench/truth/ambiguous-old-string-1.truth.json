@@ -25,6 +25,17 @@
   ],
   "expect_episodes": 1,
   "expect_filter_reasons": [],
+  "expect_reconstructions": [
+    {
+      "after": null,
+      "before": null,
+      "confidence": "none",
+      "file": "/demo/alpha/src/calc.py",
+      "hunk_count": 0,
+      "source": "claude_old_string",
+      "status": "unresolved"
+    }
+  ],
   "input_file": "claude/ambiguous-old-string-1.jsonl",
   "sample": "ambiguous-old-string-1",
   "session_id": "sess-demo-0006"

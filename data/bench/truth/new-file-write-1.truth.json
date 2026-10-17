@@ -25,6 +25,17 @@
   ],
   "expect_episodes": 1,
   "expect_filter_reasons": [],
+  "expect_reconstructions": [
+    {
+      "after": "def helper(value):\n    return value\n",
+      "before": null,
+      "confidence": "none",
+      "file": "/demo/alpha/src/helper.py",
+      "hunk_count": 0,
+      "source": "claude_write_content",
+      "status": "no_before_image"
+    }
+  ],
   "input_file": "claude/new-file-write-1.jsonl",
   "sample": "new-file-write-1",
   "session_id": "sess-demo-0007"

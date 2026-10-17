@@ -112,10 +112,18 @@ def test_manifest_declares_coverage_thresholds_and_pending_facts(tmp_path, repo_
     for episode_type, minimum in manifest["coverage"]["min_count_by_type"].items():
         observed = manifest["coverage"]["observed_count_by_type"].get(episode_type, 0)
         assert observed >= minimum, "{}: 生成量 {} < 门槛 {}".format(episode_type, observed, minimum)
-    assert "before_after" in manifest["pending_facts"], "尚未对账的面必须显式声明为 pending，不得静默跳过"
     assert "episodes" not in manifest["pending_facts"], "M2 起 episode 已真对账，不该再挂在 pending 里"
+    assert "before_after" not in manifest["pending_facts"], "M3 起 before/after 已真对账，pending 里不许再有它"
+    assert set(manifest["pending_facts"]) == {"generated_tests", "red_green"}, "未对账的面必须显式列出且只剩 M4–M5"
     assert "episode_count" in manifest["checked_facts"], "episode 事实必须进对账面"
+    assert "reconstructions" in manifest["checked_facts"], "M3 还原事实必须进对账面"
     assert manifest["thresholds"]["max_false_positive"] == 0
+    # 磁盘基线夹具也是冻结物（Codex 侧的全文 before 只能来自这里）
+    assert manifest["repo_fixtures"], "磁盘基线夹具必须在台账里"
+    for fixture in manifest["repo_fixtures"]:
+        path = tmp_path / fixture["file"]
+        assert path.is_file(), fixture
+        assert serialize.sha256_bytes(path.read_bytes()) == fixture["sha256"], fixture
 
 
 def test_privacy_self_check_rejects_a_real_looking_path(tmp_path, repo_root):
@@ -198,10 +206,68 @@ def test_missing_manifest_is_an_input_error(tmp_path, repo_root):
 
 
 def test_summary_lines_expose_failures_and_pending(repo_root):
-    """摘要必须把"未对账的面"（M3–M5）与失败样本都摆出来，不许只有一句 ok。"""
+    """摘要必须把"未对账的面"（M4–M5）与失败样本都摆出来，不许只有一句 ok。"""
     lines = bench.summary_lines(bench.run(repo_root / "data" / "bench", limits(repo_root), cfg(repo_root), only=["unsupported_format"]))
     assert any("pending" in line for line in lines)
-    assert any("before_after" in line for line in lines), "M3 尚未对账的面必须出现在摘要里"
+    assert any("generated_tests" in line for line in lines), "M4 尚未对账的面必须出现在摘要里"
+    assert not any("before_after" in line for line in lines), "M3 已真对账的面不该再出现在 pending 行里"
+
+
+def test_reconstruction_mismatch_is_attributed_to_the_sample(tmp_path, repo_root):
+    """还原对账必须点名到**具体文件的具体字段**（否则"两边不等"说不出坏在哪）。
+
+    用"把 before 改成 after"这个最典型的还原错误做变异：改真值 → 对账必须红，
+    且差异里要出现 `reconstructions[...].before`（不是一句笼统的"不一致"）。
+    """
+    copy = tmp_path / "bench"
+    shutil.copytree(str(repo_root / "data" / "bench"), str(copy))
+    truth = copy / "truth" / "structured-patch-1.truth.json"
+    data = json.loads(serialize.read_text(truth))
+    data["expect_reconstructions"][0]["before"] = "def divide(a, b):\n    return a / b if b else 0\n"
+    with open(str(truth), "w", encoding="utf-8", newline="\n") as stream:
+        stream.write(serialize.dumps_json(data))
+
+    report = bench.run(copy, limits(repo_root), cfg(repo_root), only=["structured_patch"])
+    entry = [item for item in report["samples"] if item["sample"] == "structured-patch-1"][0]
+    assert entry["status"] == "fail", entry
+    assert any("reconstructions[" in item and ".before" in item for item in entry["mismatches"]), entry["mismatches"]
+    assert report["status"] != "ok"
+
+    lines = bench.summary_lines(report)
+    assert any("reconstructions[" in line for line in lines), lines
+
+
+def test_corpus_exercises_every_degradation_path(repo_root):
+    """语料必须**真的走到**每一条降级路径（M2 的教训：样本没走到 = 路径没验过）。
+
+    三条降级路径 + 一个第三态各有具名样本：① 结构化补丁、② 子串定位、③ Codex 的两条通道，
+    以及 `unresolved` / `partial` / `no_before_image` 三个"不许猜"的出口。
+    """
+    from s2r import reconstruct
+
+    manifest = bench.load_manifest(repo_root / "data" / "bench")
+    statuses = set()
+    sources = set()
+    for sample in manifest["samples"]:
+        truth = json.loads(serialize.read_text(repo_root / "data" / "bench" / sample["truth"]))
+        for item in truth.get("expect_reconstructions") or []:
+            statuses.add(item["status"])
+            sources.add(item["source"])
+    assert statuses == set(reconstruct.STATUSES), "还原状态的覆盖不完整: {}".format(sorted(set(reconstruct.STATUSES) - statuses))
+    for source in (reconstruct.SOURCE_CLAUDE_PATCH, reconstruct.SOURCE_CLAUDE_OLD_STRING, reconstruct.SOURCE_CODEX_DIFF, reconstruct.SOURCE_CODEX_PATCH):
+        assert source in sources, "降级路径缺样本: {}".format(source)
+
+
+def test_reconstruction_fact_contract_is_locked():
+    """对账字段集是契约：真值声明哪些键、`Reconstruction.fact()` 就产出哪些键。"""
+    from s2r import reconstruct
+
+    fact = reconstruct.Reconstruction(
+        file="/demo/a.py", before="a\n", after="b\n", hunks=[], source=reconstruct.SOURCE_NONE, confidence=reconstruct.CONFIDENCE_NONE
+    ).fact()
+    assert set(fact) == set(bench.RECONSTRUCTION_FACTS)
+    assert "reconstructions" in bench.CHECKED_FACTS
+    assert set(bench.PROBES) >= {"swap-before-after"}
 
 
 def test_episode_mismatch_is_attributed_to_the_sample(tmp_path, repo_root):

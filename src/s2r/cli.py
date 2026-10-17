@@ -29,7 +29,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
-from . import __version__, bench as bench_mod, benchdata, config as config_mod, events, paths as paths_mod, readers, serialize, stdio
+from . import __version__, bench as bench_mod, benchdata, config as config_mod, events, paths as paths_mod, readers, reconstruct as reconstruct_mod, serialize, stdio
 from .errors import (EXIT_CHECK_FAILED, EXIT_DEPENDENCY_MISSING, EXIT_OK, EXIT_STAGE_NOT_READY, EXIT_USAGE,
                      InputUnavailable, S2RError, StageNotReady, UsageError)
 
@@ -37,7 +37,6 @@ PROG = "s2r"
 
 #: 尚未交付的子命令 → 所属里程碑（里程碑落地时整项摘除，并同步 tools/ci_smoke.py、README、plan）
 STAGED_COMMANDS: Dict[str, str] = {
-    "reconstruct": "M3",
     "generate": "M4",
     "verify": "M5",
     "run": "M5",
@@ -174,6 +173,38 @@ def _scan_problem_detail(result) -> str:
     if len(items) > len(shown):
         shown.append("… 另有 {} 件".format(len(items) - len(shown)))
     return " | ".join(shown)
+
+
+def cmd_reconstruct(args: argparse.Namespace) -> int:
+    """M3：从**日志证据**还原每个改动文件的 before/after（logs-only，不依赖 git）。
+
+    退出码：0 = 至少一个文件给出**完整** before/after；1 = 一个都没有（全为片段 `partial` /
+    无法唯一定位 `unresolved` / 无 before 镜像 `no_before_image`，或该会话里根本没有写文件证据）
+    ——显式降级，不伪装成功；2 = 用法错误或输入不可用。
+    """
+    config = config_mod.load_config(args.config)
+    limits = readers.limits_from_config(config)
+    session_path = reconstruct_mod.resolve_session_file(
+        args.session, limits, roots={"claude": args.claude_root, "codex": args.codex_root}
+    )
+    file_read = reconstruct_mod.load_session(session_path, limits)
+    result = reconstruct_mod.reconstruct_session(file_read, config, repo=args.repo)
+    counts = result.counts()
+    unverified = [item for item in result.episodes if item["status"] != reconstruct_mod.STATUS_OK]
+    if args.out:
+        serialize.write_text_atomic(args.out, result.to_json())
+        sys.stdout.write(
+            "reconstruct: {}/{}（{} 条事件）→ {} 个文件（完整 {}，片段 {}，无法定位 {}，无 before 镜像 {}），"
+            "episode {}（非 ok {}）→ {}\n".format(
+                result.source, result.session_id, len(file_read.events), len(result.files),
+                counts[reconstruct_mod.STATUS_OK], counts[reconstruct_mod.STATUS_PARTIAL],
+                counts[reconstruct_mod.STATUS_UNRESOLVED], counts[reconstruct_mod.STATUS_NO_BEFORE],
+                len(result.episodes), len(unverified), args.out,
+            )
+        )
+    else:
+        sys.stdout.write(result.to_json())
+    return EXIT_OK if result.ok_files else EXIT_CHECK_FAILED
 
 
 def cmd_bench(args: argparse.Namespace) -> int:
@@ -391,11 +422,12 @@ def build_parser() -> argparse.ArgumentParser:
     bench.set_defaults(handler=cmd_bench)
 
     reconstruct = sub.add_parser("reconstruct", help="M3：before/after 差分还原（logs-only，不依赖 git）")
-    reconstruct.add_argument("session", metavar="SESSION", help="会话引用（source:session_id 或日志路径）")
-    reconstruct.add_argument("--repo", metavar="DIR", default=None, help="可选目标仓库根（用于对齐磁盘文件）")
+    reconstruct.add_argument("session", metavar="SESSION", help="会话引用（<source>:<session_id> 或 jsonl 日志路径）")
+    reconstruct.add_argument("--repo", metavar="DIR", default=None, help="可选磁盘基线根（该编辑发生前的工作区；不给则不碰用户工作区）")
+    add_source_args(reconstruct)
     reconstruct.add_argument("--out", metavar="FILE", default=None, help="还原产物落点（不传则打 stdout）")
     add_config_arg(reconstruct)
-    reconstruct.set_defaults(handler=_make_staged_handler("reconstruct"))
+    reconstruct.set_defaults(handler=cmd_reconstruct)
 
     generate = sub.add_parser("generate", help="M4：生成 pytest 回归骨架")
     generate.add_argument("episode", metavar="EPISODE_ID", help="episode_id")

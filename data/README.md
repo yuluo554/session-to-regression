@@ -124,7 +124,11 @@
    - `doc_only`：只改了 `.md`（打分应低）；
    - `ambiguous_old_string`：`old_string` 多处命中（应标 `unresolved`，不得任选）；
    - `new_file_write`：纯新建文件（无 before，不得进入生成路径）；
-   - `unsupported_format`：未知格式（必须显式报错）。
+   - `unsupported_format`：未知格式（必须显式报错）；
+   - `structured_patch`（M3 起）：① 路径具名样本——`originalFile` + **非空** `structuredPatch`；
+   - `base_drift`（M3 起）：③ 路径的降级样本——磁盘基线与 patch **对不上**（应落 `partial`，不硬套）。
+   - 另有一组**磁盘基线夹具**（`data/bench/repo/<样本>/…`，同进 sha256 台账）：Codex 侧日志里
+     没有 before 全文，全文基线只能来自"该编辑发生前的工作区"，基准把它一并冻结才谈得上逐字符对账。
 4. **合成日志形态**：Claude 侧仿 `type` + `message.content[]` + `toolUseResult`；Codex 侧仿 `session_meta` / `response_item` + `payload.type` + `*** Begin Patch`；**字段名与本机实测一致**，值全部为白名单假值。
 5. **冻结与可审计**：生成器与真值标注入仓；生成的样例可一条命令重建（`--check` 位级一致）；样例体积控制在仓库友好范围。
 6. **不落真实日志**：`.gitignore` 已屏蔽 `sessions/` / `exports/` / `_real_logs/`；任何从本机日志导出的中间件不得入库。
@@ -148,8 +152,9 @@
 | R1 | Codex `apply_patch` 载荷内文件路径字段 | ✅ 已核对（结论见 §六.2） | M1 |
 | R2 | Claude `MultiEdit` 字段形态 | ✅ 已核对：全量 0 次，保留降级语义（§六.3） | M1 |
 | R3 | Codex `exec` 失败判定字段语义 | ✅ 已核对（结论见 §六.4） | M1 |
-| R4 | 合成日志覆盖度门槛具体数值 | ⬜ 待定 | M1（写进 `data/bench/manifest.json`） |
-| R5 | 真实样本量的最终表述（5 强 / 29 弱）是否随复核变化 | ⬜ 待复核 | M1（只更新快照，不改承诺） |
+| R4 | 合成日志覆盖度门槛具体数值 | ✅ 已定稿：10 类各 ≥1（写进 `data/bench/manifest.json`） | M1 |
+| R5 | 真实样本量的最终表述（5 强 / 29 弱）是否随复核变化 | ✅ 已复核：表述不变 | M1 |
+| R6 | 还原层真值形态（逐文件 before/after + 来源/置信度 + 磁盘基线） | ✅ 已闭环（§六.10，落真值 `expect_reconstructions`） | M3 |
 
 ---
 
@@ -299,3 +304,18 @@
 **2 个**、其中能把"同一测试命令转为通过"配上的只有 **1 个** → 绝大多数 episode 落 `ended_without_pass`。
 这与题面"真实会话里的修复很少留下可复现验证"的判断一致，也说明**M5 的 RED/GREEN 双验证不能指望
 真实日志自带证据**——必须在隔离副本里自己造 before/after 两态。
+
+### 6.10 M3 还原复核（结论与口径增量）
+
+**范围**：合成语料（10 类样本）+ 设计阶段的日志实测事实（`§六.1–§六.7`）。**不含**任何真实代码内容。
+
+| # | 结论 | 影响 |
+|---|---|---|
+| M3-1 | **Codex 侧日志内没有 before 全文**：`FileChange` 只给 `unified_diff`（2347 个变更对象）或 `content`（1274 个，新增），`apply_patch` 只给 patch 文本 | 全文 before 只能来自磁盘基线（显式 `--repo`）；无基线 → `partial`（片段级证据，`before`/`after` 为 null），**不伪造上下文行** |
+| M3-2 | **Claude 侧 before 全文来自 `originalFile`**（实测 107 条同时带 `originalFile` 与 `structuredPatch`），属于**日志内**事实 → 置信度 `high` | 磁盘对齐不是 Claude 侧的必需项（只在缺 `originalFile` 时才需要） |
+| M3-3 | 空 `structuredPatch`（实测 82 条）**不含 diff** → 判据必须"键存在**且非空**" | 空表样本走 ② 子串定位；语料 `ambiguous-old-string-1` 就是"有 before 全文但无 hunk"的形态（实测里 `type` 键多缺失，与 E1 一致） |
+| M3-4 | `apply_patch` 文本**不携带行号**（`@@` 后无区间），而 `FileChange.unified_diff` 带 `@@ -a,b +c,d @@` | 定位策略分两级：先按声明行号、再按内容唯一定位；`aligned_by` 如实记录用的是哪一种；都不成立 → 拒绝（`hunk_mismatch` / `ambiguous_match`） |
+| M3-5 | 会话里的 `apply_patch` 与 `FileChange` **无法配对**（后者没有 call_id，M1 已定"不按时间序猜"） | 同文件两条通道都在时按**通道优先级**取结构化那条（首选），另一条只记进 `evidence.channels`，不叠加成两个"改动" |
+
+**口径增量（M3 起生效）**：见 `plan/07` §五 的 **K24 / K25 / K26**（四态不折叠、置信度由来源决定 +
+磁盘读取显式开关、还原对账面逐文件逐字段且 `before_after` 从 pending 摘除）。

@@ -46,7 +46,9 @@ INVOCATIONS = {
     # 而该样本被 RNG 分到了 codex/ 下 → 冒烟报 input_unavailable）。
     "scan": ["data/bench/claude"],
     "bench": [],
-    "reconstruct": ["sess-demo-0001"],
+    # reconstruct 用**固定 harness 的样本**（multi-bug-1 恒为 Claude 侧），
+    # 不依赖 RNG 选型；它同时是 ② 路径（old_string + originalFile）的冒烟面。
+    "reconstruct": ["data/bench/claude/multi-bug-1.jsonl"],
     "generate": ["sess-demo-0001#1"],
     "verify": ["sess-demo-0001#1"],
     "run": ["--target", "demo-target"],
@@ -56,6 +58,7 @@ INVOCATIONS = {
 DELIVERED_EXPECT = {
     "scan": errors.EXIT_OK,
     "bench": errors.EXIT_OK,
+    "reconstruct": errors.EXIT_OK,
 }
 
 

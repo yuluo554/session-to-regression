@@ -19,15 +19,15 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
-from . import benchdata, episode as episode_mod, events, readers, serialize
+from . import benchdata, episode as episode_mod, events, readers, reconstruct as reconstruct_mod, serialize
 from .errors import InputUnavailable, UnsupportedFormat
 
 MANIFEST_NAME = benchdata.MANIFEST_NAME
 
 #: 探活名：向"读到的实际事实"注入缺陷，基准必须检出
-PROBES = ("drop-tool", "zero-events", "drop-exit-code", "accept-unknown", "drop-episode", "keep-filtered")
+PROBES = ("drop-tool", "zero-events", "drop-exit-code", "accept-unknown", "drop-episode", "keep-filtered", "swap-before-after")
 
-#: 对账的字段集（与 manifest 的 checked_facts 对应；episodes 属 M2，见 pending_facts）
+#: 对账的字段集（与 manifest 的 checked_facts 对应；`reconstructions` 属 M3）
 CHECKED_FACTS = (
     "source",
     "format_version",
@@ -42,7 +42,12 @@ CHECKED_FACTS = (
     "episode_count",
     "episode_statuses",
     "filter_reasons",
+    # M3 起：还原层事实（真值里的 expect_reconstructions 逐文件声明 before/after/status/source/confidence）
+    "reconstructions",
 )
+
+#: 逐文件对账的键（真值可只声明其中一部分；键集合由测试锁死）
+RECONSTRUCTION_FACTS = ("file", "status", "source", "confidence", "before", "after", "hunk_count")
 
 
 def load_manifest(data_dir: Path) -> Mapping[str, Any]:
@@ -64,7 +69,7 @@ def load_manifest(data_dir: Path) -> Mapping[str, Any]:
     return manifest
 
 
-def _facts(file_read: readers.FileRead, expected: Mapping[str, Any], cfg: Mapping[str, Any]) -> Dict[str, Any]:
+def _facts(file_read: readers.FileRead, expected: Mapping[str, Any], cfg: Mapping[str, Any], repo: Optional[str] = None) -> Dict[str, Any]:
     """从读取结果里算出**可对账的事实**（只算，不判定）。"""
     kinds: Counter = Counter(event.kind for event in file_read.events)
     tools: List[str] = []
@@ -88,6 +93,7 @@ def _facts(file_read: readers.FileRead, expected: Mapping[str, Any], cfg: Mappin
     matched_fragments = [fragment for fragment in declared_fragments if any(fragment in text for text in user_texts)]
     session_files = {event.session_id: str(file_read.path) for event in file_read.events}
     split = episode_mod.split(file_read.events, cfg, session_files=session_files)
+    reconstruction = reconstruct_mod.reconstruct_session(file_read, cfg, repo=repo)
     return {
         "source": file_read.source,
         "format_version": file_read.format_version,
@@ -100,6 +106,7 @@ def _facts(file_read: readers.FileRead, expected: Mapping[str, Any], cfg: Mappin
         "episode_count": len(split.episodes),
         "episode_statuses": [item.status for item in split.episodes],
         "filter_reasons": sorted(str(item["reason"]) for item in split.filtered),
+        "reconstructions": [item.fact() for item in reconstruction.files],
     }
 
 
@@ -109,9 +116,32 @@ def compare(expected: Mapping[str, Any], actual: Mapping[str, Any]) -> List[str]
     for field in CHECKED_FACTS:
         if field not in expected:
             continue
+        if field == "reconstructions":
+            # 逐文件、逐字段点名——汇总成"两边不等"就说不清是哪一文件的哪一项坏了
+            mismatches.extend(compare_reconstructions(expected[field], actual.get(field)))
+            continue
         want, got = expected[field], actual.get(field)
         if want != got:
             mismatches.append("{}: 期望 {!r}，实际 {!r}".format(field, want, got))
+    return mismatches
+
+
+def compare_reconstructions(expected: Any, actual: Any) -> List[str]:
+    """还原事实逐文件对账（缺项/多项/字段不符都要点名到文件与字段）。"""
+    mismatches: List[str] = []
+    want = list(expected or [])
+    got = list(actual or [])
+    if len(want) != len(got):
+        mismatches.append("reconstructions: 期望 {} 项，实际 {} 项".format(len(want), len(got)))
+    for index in range(min(len(want), len(got))):
+        left = want[index] if isinstance(want[index], Mapping) else {}
+        right = got[index] if isinstance(got[index], Mapping) else {}
+        label = "reconstructions[{}]".format(right.get("file") or left.get("file") or index)
+        for key in RECONSTRUCTION_FACTS:
+            if key not in left:
+                continue
+            if left[key] != right.get(key):
+                mismatches.append("{}.{}: 期望 {!r}，实际 {!r}".format(label, key, left[key], right.get(key)))
     return mismatches
 
 
@@ -133,6 +163,11 @@ def _apply_probe(probe: Optional[str], actual: Dict[str, Any]) -> Dict[str, Any]
         # 模拟"该被过滤的候选没被过滤掉"
         if actual["filter_reasons"]:
             actual["filter_reasons"] = actual["filter_reasons"][:-1]
+    elif probe == "swap-before-after":
+        # 模拟最典型的还原错误：把 after 当成 before 交出去（"看着像有产物"的那种坏）
+        for item in actual.get("reconstructions") or []:
+            if isinstance(item, dict) and isinstance(item.get("before"), str) and isinstance(item.get("after"), str):
+                item["before"], item["after"] = item["after"], item["before"]
     return actual
 
 
@@ -178,6 +213,14 @@ def run(
         checked += 1
         if sample_reports[-1]["status"] in ("pass", "error_ok"):
             matched += 1
+
+    # 磁盘基线夹具也在台账里（"字节即契约"对它们同样成立：改了就没收据）
+    for fixture in manifest.get("repo_fixtures", []):
+        fixture_path = data_dir / fixture["file"]
+        if not fixture_path.is_file():
+            missing_files.append(fixture["file"])
+        elif serialize.sha256_bytes(fixture_path.read_bytes()) != fixture["sha256"]:
+            ledger_mismatches.append("{}: 磁盘基线 sha256 与台账不符".format(fixture["file"]))
 
     coverage_missing = []
     for episode_type, minimum in sorted(manifest["coverage"]["min_count_by_type"].items()):
@@ -240,7 +283,14 @@ def _check_sample(
         expected["episode_count"] = truth["expect_episodes"]
         expected["episode_statuses"] = list(truth.get("expect_episode_statuses") or [])
         expected["filter_reasons"] = sorted(str(item) for item in (truth.get("expect_filter_reasons") or []))
+    # M3：还原层期望（逐文件 before/after/status/source/confidence）
+    if "expect_reconstructions" in truth:
+        expected = dict(expected)
+        expected["reconstructions"] = list(truth["expect_reconstructions"] or [])
     expect_error = truth.get("expect_error")
+    # 磁盘基线：Codex 侧的全文 before 只能来自"该编辑发生前的磁盘状态"（随语料冻结）
+    repo_rel = str(sample.get("repo") or "")
+    repo = str(data_dir / repo_rel) if repo_rel else None
 
     if expect_error:
         if probe == "accept-unknown":
@@ -277,7 +327,7 @@ def _check_sample(
         sample_reports.append({"sample": name, "episode_type": episode_type, "status": "fail", "mismatches": ["读取失败: {}: {}".format(type(exc).__name__, exc)]})
         return
 
-    actual = _apply_probe(probe, _facts(file_read, expected, cfg))
+    actual = _apply_probe(probe, _facts(file_read, expected, cfg, repo=repo))
     mismatches = compare(expected, actual)
     sample_reports.append({"sample": name, "episode_type": episode_type, "status": "pass" if not mismatches else "fail", "mismatches": mismatches})
 

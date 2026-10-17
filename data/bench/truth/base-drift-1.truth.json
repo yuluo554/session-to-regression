@@ -1,0 +1,46 @@
+{
+  "episode_type": "base_drift",
+  "expect": {
+    "event_count": 6,
+    "exit_codes": [
+      1,
+      0
+    ],
+    "files_touched": [
+      "/demo/alpha/src/calc.py"
+    ],
+    "kind_counts": {
+      "meta": 1,
+      "tool_call": 2,
+      "tool_result": 2,
+      "user_msg": 1
+    },
+    "source": "codex",
+    "tools_used": [
+      "shell_command",
+      "apply_patch"
+    ],
+    "user_report_fragments": [
+      "demo-user, bug: cli returns the wrong item in /demo/alpha/src/calc.py"
+    ]
+  },
+  "expect_episode_statuses": [
+    "ended_without_pass"
+  ],
+  "expect_episodes": 1,
+  "expect_filter_reasons": [],
+  "expect_reconstructions": [
+    {
+      "after": null,
+      "before": null,
+      "confidence": "low",
+      "file": "/demo/alpha/src/calc.py",
+      "hunk_count": 1,
+      "source": "codex_patch_text",
+      "status": "partial"
+    }
+  ],
+  "input_file": "codex/base-drift-1.jsonl",
+  "sample": "base-drift-1",
+  "session_id": "sess-demo-0010"
+}

@@ -25,6 +25,7 @@
   "expect_filter_reasons": [
     "no_failure_evidence"
   ],
+  "expect_reconstructions": [],
   "input_file": "claude/no-failure-signal-1.jsonl",
   "sample": "no-failure-signal-1",
   "session_id": "sess-demo-0004"
