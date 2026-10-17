@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "session-to-regression"
+description = "从本机 agent 会话日志切出 bug-fix episode，把修复 diff 反推成可复跑的 pytest 骨架（纯本地、零上传）"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "yuluo554" }]
+keywords = ["regression-test", "agent-session", "pytest", "local-only", "cli"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.8",
+  "License :: OSI Approved :: MIT License",
+  "Environment :: Console",
+  "Topic :: Software Development :: Testing",
+]
+# 运行期零第三方依赖：纯标准库实现（本地解析 + 自研 TOML 子集读取器）。
+dependencies = []
+dynamic = ["version"]
+
+[project.optional-dependencies]
+# README 快速开始与 CI 必须使用同一 extras 集合。
+dev = ["pytest>=7,<9"]
+
+[project.scripts]
+s2r = "s2r.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+# 随包副本：安装后仍能定位唯一数值口径文件（与仓库 config/scoring.toml 逐字节相同，守门测试锁死）。
+s2r = ["resources/*.toml"]
+
+[tool.setuptools.dynamic]
+version = { attr = "s2r.__version__" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

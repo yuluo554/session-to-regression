@@ -68,6 +68,10 @@ selftest.json
 # 本地隔离验证环境
 .clean-store/
 .clean-venv/
+.venv*/
+
+# 打包元数据（`pip install -e .` 会在 src/ 下生成）
+*.egg-info/
 
 # 环境与密钥
 .env

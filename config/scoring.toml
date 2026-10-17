@@ -1,0 +1,49 @@
+# session-to-regression 唯一数值口径文件（全项目唯一权威）
+#
+# 纪律：本文件是全项目唯一的数值定义处。README / 报告 / 基准 / 计划文档一律【引用】本文件，
+# 不得再写第二份数值表；运行期由 s2r/config.py 读取并做形状校验——读不懂即显式报错，
+# 绝不回落到代码里的默认值（代码内不内嵌任何口径数值，见 tests/test_config_single_source.py）。
+#
+# 仓库权威路径：config/scoring.toml
+# 随包副本：src/s2r/resources/scoring.toml（安装后仍可定位；两者必须逐字节相同，守门测试锁死）
+
+config_version = 1
+
+[scoring.weights]
+# episode 打分权重（题面 §2 M2 的口径声明；权威值在本文件）
+failure_signal = 2  # 命中失败信号
+reconstruction = 3  # 有可还原的 before/after diff
+test_command = 2    # episode 内出现过测试命令
+code_change = 2     # 改的是代码而非文档（非 .md）
+
+[scoring.threshold]
+# 总分低于该阈值的候选直接丢弃（阈值唯一权威处）
+min_score = 5
+
+[episode]
+# episode_id = 会话 id + 首次修复事件序号（稳定可复现，不含时钟）
+id_format = "{session_id}#{first_fix_seq}"
+# 会话安全阀：超限显式报错，绝不静默截断（截断会让 episode 起点漂移）
+max_events_per_session = 200000
+max_line_bytes = 4194304
+
+[verify]
+# M5 RED/GREEN 双验证（临时副本内进行，不碰用户工作区）
+timeout_seconds = 300
+tmpdir_prefix = "s2r-verify-"
+pytest_command = ["python", "-m", "pytest"]
+red_expectation = "must_fail"
+green_expectation = "must_pass"
+
+[generate]
+# M4 生成器落点（目标仓库内相对路径；只在探测失败时使用 assumed_*，并在 manifest 标 assumed_convention）
+tests_dir = "tests/regression"
+assumed_tests_dir = "tests/regression"
+manifest_path = "regression/manifest.json"
+arrange_placeholder = "# TODO: arrange"
+assert_placeholder = "# TODO: assert"
+
+[vocabulary]
+# 语义词表：唯一来源在本文件；源码与测试不得内嵌词面（守门测试锁死）。
+bug_terms = ["bug", "报错", "错误", "失败", "崩溃", "不工作", "复现", "异常", "broken", "doesn't work", "fail"]
+failure_signals = ["FAILED", "AssertionError", "Traceback", "Exit code"]

@@ -1,0 +1,23 @@
+# 源码归一：统一 LF，免得 Windows 检出带入 CR（CR 守门测试会当场红）
+* text=auto eol=lf
+
+*.py text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.cfg text eol=lf
+*.txt text eol=lf
+
+# 冻结基准快照（M1 起入仓的合成会话日志）：字节即契约，禁止任何 EOL 归一、
+# 否则登记在 manifest 里的 sha256 会在别的机器上失配。生成器保证 LF。
+data/bench/** -text
+
+# 二进制
+*.zip binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.whl binary
+*.exe binary
