@@ -1,0 +1,27 @@
+{
+  "episode_type": "no_failure_signal",
+  "expect": {
+    "event_count": 4,
+    "exit_codes": [],
+    "files_touched": [
+      "/demo/beta/pkg/format.py"
+    ],
+    "kind_counts": {
+      "assistant_msg": 1,
+      "tool_call": 1,
+      "tool_result": 1,
+      "user_msg": 1
+    },
+    "source": "claude",
+    "tools_used": [
+      "Read"
+    ],
+    "user_report_fragments": [
+      "demo-user, bug: the CSV export looks wrong in /demo/alpha/src/calc.py"
+    ]
+  },
+  "expect_episodes": 0,
+  "input_file": "claude/no-failure-signal-1.jsonl",
+  "sample": "no-failure-signal-1",
+  "session_id": "sess-demo-0004"
+}

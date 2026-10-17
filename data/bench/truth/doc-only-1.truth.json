@@ -1,0 +1,27 @@
+{
+  "episode_type": "doc_only",
+  "expect": {
+    "event_count": 5,
+    "exit_codes": [],
+    "files_touched": [
+      "/demo/alpha/docs/notes.md"
+    ],
+    "kind_counts": {
+      "tool_call": 2,
+      "tool_result": 2,
+      "user_msg": 1
+    },
+    "source": "claude",
+    "tools_used": [
+      "Bash",
+      "Edit"
+    ],
+    "user_report_fragments": [
+      "demo-user, bug: the README instructions are outdated in /demo/alpha/src/calc.py"
+    ]
+  },
+  "expect_episodes": 0,
+  "input_file": "claude/doc-only-1.jsonl",
+  "sample": "doc-only-1",
+  "session_id": "sess-demo-0005"
+}

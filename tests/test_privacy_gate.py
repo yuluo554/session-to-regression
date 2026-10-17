@@ -37,13 +37,29 @@ FORBIDDEN_IMPORTS = frozenset(
 )
 
 #: 泄露本机形态的字符串形态（脱敏：入库文本不得含本机绝对路径）。
-#: 用正则而不是字面量：① 只匹配"真实路径形态"（盘符+反斜杠、家目录+用户名段），
-#: 不误伤文档里讨论路径**形式**的叙述（如 POSIX 风格的 ~ 展开示例）；
-#: ② 正则源码本身不含被匹配的字面串，扫描器扫到自己也不会自命中。
+#: 判据用正则而不是字面量：① 只匹配"真实路径形态"（**大写盘符**+反斜杠、家目录+用户名段），
+#: 不误伤文档里讨论路径**形式**的叙述；② 正则源码本身不含被匹配的字面串，扫到自己也不会自命中。
+#:
+#: 为什么盘符限定大写：源码里的 `...:\n` 这类**转义序列**（如 `"Output:\nSuccess"`）会命中
+#: `<任意字母>:\` 这种宽判据——本项目首版就这么误报了三处（`t:\`/`e:\` 来自 `\n` 与 `\s`）。
+#: 真实日志里的 Windows 路径按惯例是大写盘符，所以收紧到大写既保住检出（见下面的阳性对照），
+#: 又消掉转义噪声。
 LOCAL_PATH_PATTERNS = (
-    re.compile(r"[A-Za-z]:\\"),
+    re.compile(r"[A-Z]:\\"),
     re.compile(r"/(?:Users|home)/[A-Za-z0-9._-]+/"),
 )
+
+
+def test_local_path_pattern_has_a_positive_control():
+    """阳性对照：门的判据必须真能命中"像泄漏"的形态——否则它只是个永远绿的装饰。
+
+    样本在**运行时拼装**（源码里不留该字面量，避免扫描器自命中）。
+    """
+    leaked = "B" + chr(58) + chr(92) + "work" + chr(92) + "demo.txt"
+    assert any(pattern.search(leaked) for pattern in LOCAL_PATH_PATTERNS), leaked
+    # 阴性对照：转义序列与相对路径不得命中（否则门会淹没在噪声里）
+    for benign in ("Output:" + chr(92) + "nSuccess", "tests/regression/test_calc.py", "sess-demo-0001"):
+        assert not any(pattern.search(benign) for pattern in LOCAL_PATH_PATTERNS), benign
 
 SCAN_SUFFIXES = (".py", ".toml", ".md", ".yml", ".yaml", ".cfg", ".txt")
 

@@ -29,16 +29,14 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
-from . import __version__, config as config_mod, events, serialize, stdio
+from . import __version__, bench as bench_mod, benchdata, config as config_mod, events, paths as paths_mod, readers, serialize, stdio
 from .errors import (EXIT_CHECK_FAILED, EXIT_DEPENDENCY_MISSING, EXIT_OK, EXIT_STAGE_NOT_READY, EXIT_USAGE,
                      InputUnavailable, S2RError, StageNotReady, UsageError)
 
 PROG = "s2r"
 
-#: 尚未交付的子命令 → 所属里程碑（里程碑落地时整项摘除）
+#: 尚未交付的子命令 → 所属里程碑（里程碑落地时整项摘除，并同步 tools/ci_smoke.py、README、plan）
 STAGED_COMMANDS: Dict[str, str] = {
-    "scan": "M1",
-    "bench": "M1",
     "reconstruct": "M3",
     "generate": "M4",
     "verify": "M5",
@@ -78,6 +76,7 @@ def cmd_selftest(args: argparse.Namespace) -> int:
         checks.append(_check_serialize_determinism(config))
         checks.append(_check_events_roundtrip())
         checks.append(_check_harness_detection())
+        checks.append(_check_format_fingerprints())
 
     pytest_ok = pytest_available()
     if not pytest_ok:
@@ -128,6 +127,63 @@ def cmd_config_path(args: argparse.Namespace) -> int:
 
 def cmd_config_bare(args: argparse.Namespace) -> int:
     raise UsageError("config 需要子命令: show 或 path")
+
+
+def cmd_scan(args: argparse.Namespace) -> int:
+    """M1：读 jsonl 会话日志 → 归一事件流（确定性字节，可 `--out` 落盘）。
+
+    退出码：0 = 读到至少一条事件；1 = 读到了文件但**零事件**（显式降级，不伪装成功）；
+    2 = 输入不可用 / 未知格式；3 = 不适用。
+    """
+    config = config_mod.load_config(args.config)
+    limits = readers.limits_from_config(config)
+    result = readers.scan(args.inputs, limits, roots=[args.claude_root, args.codex_root])
+    text = readers.dump(result)
+    event_count = len(result.events)
+    if args.out:
+        serialize.write_text_atomic(args.out, text)
+        sys.stdout.write(
+            "scan: {} 个文件，{} 个会话，{} 条事件 → {}\n".format(
+                len(result.files), len(result.to_dict()["sessions"]), event_count, args.out
+            )
+        )
+    else:
+        sys.stdout.write(text)
+    return EXIT_OK if event_count else EXIT_CHECK_FAILED
+
+
+def cmd_bench(args: argparse.Namespace) -> int:
+    """M1：合成语料基准对账（双边门 + 逐样本点名；`--check` 只做再生成位级一致校验）。
+
+    退出码：0 = 达标（或探活模式下"缺陷被检出"）；1 = 未达标（或探活模式下"缺陷没被检出"）；
+    2 = 用法/输入不可用。
+    """
+    config = config_mod.load_config(args.config)
+    limits = readers.limits_from_config(config)
+    data_dir = Path(args.data_dir) if args.data_dir else Path(__file__).resolve().parents[2].joinpath(*benchdata.BENCH_RELATIVE)
+
+    if args.check:
+        with tempfile.TemporaryDirectory(prefix="s2r-bench-check-") as tmp:
+            stats = benchdata.write_corpus(Path(tmp), config)
+            if not data_dir.is_dir():
+                raise InputUnavailable("冻结基准语料不存在: {}".format(data_dir))
+            problems = benchdata.diff_trees(data_dir, Path(tmp))
+        if problems:
+            for problem in problems:
+                sys.stdout.write(problem + "\n")
+            sys.stdout.write("基准再生成不一致（{} 处）\n".format(len(problems)))
+            return EXIT_CHECK_FAILED
+        sys.stdout.write("基准再生成位级一致（{} 个样本，rng_draws={}）\n".format(stats["samples"], stats["draws"]))
+        return EXIT_OK
+
+    report = bench_mod.run(data_dir, limits, only=args.only, probe=args.probe)
+    for line in bench_mod.summary_lines(report):
+        sys.stdout.write(line + "\n")
+    if args.out:
+        serialize.write_json_atomic(args.out, report)
+    if args.probe:
+        return EXIT_OK if report.get("probe_detected") else EXIT_CHECK_FAILED
+    return EXIT_OK if report["status"] == "ok" else EXIT_CHECK_FAILED
 
 
 def _render_value(value: Any) -> str:
@@ -212,6 +268,28 @@ def _check_harness_detection() -> Check:
     return Check("harness_detection", False, "未知首行形态未报错（静默归类风险）")
 
 
+def _check_format_fingerprints() -> Check:
+    """版本指纹表自洽：按表**自己构造**一份合规视图 → 必须判出该版本；缺键视图 → 必须报错。
+
+    这条检查会随指纹表一起失效（表被清空或写坏即红），所以它不是恒真的装饰。
+    """
+    if not events.FORMAT_VERSION_FINGERPRINTS:
+        return Check("format_fingerprints", False, "版本指纹表为空")
+    checked = 0
+    for source, table in sorted(events.FORMAT_VERSION_FINGERPRINTS.items()):
+        for version, keys in sorted(table.items()):
+            view = {key: "demo" for key in sorted(keys)}
+            detected = events.detect_format_version(source, [view])
+            if detected != version:
+                return Check("format_fingerprints", False, "{}: 期望 {} 实际 {}".format(source, version, detected))
+            checked += 1
+    try:
+        events.detect_format_version("claude", [{"type": "user"}])
+    except S2RError:
+        return Check("format_fingerprints", True, "{} 个版本指纹；缺键视图显式报错".format(checked))
+    return Check("format_fingerprints", False, "缺键视图未报错（宽松解析风险）")
+
+
 # --------------------------------------------------------------------------- #
 # 未交付命令
 # --------------------------------------------------------------------------- #
@@ -277,14 +355,16 @@ def build_parser() -> argparse.ArgumentParser:
     add_source_args(scan)
     scan.add_argument("--out", metavar="FILE", default=None, help="事件流产物落点（不传则打 stdout）")
     add_config_arg(scan)
-    scan.set_defaults(handler=_make_staged_handler("scan"))
+    scan.set_defaults(handler=cmd_scan)
 
     bench = sub.add_parser("bench", help="M1：合成会话基准 + 植入真值对账")
-    bench.add_argument("--only", nargs="*", default=None, metavar="TYPE", help="只跑指定 episode 类型")
-    bench.add_argument("--out-dir", metavar="DIR", default=None, help="中间产物与报告落点（可单步复查）")
-    bench.add_argument("--check", action="store_true", help="只做再生成位级一致校验")
+    bench.add_argument("--only", nargs="*", default=None, metavar="TYPE", help="只跑指定 episode 类型或样本名")
+    bench.add_argument("--data-dir", metavar="DIR", default=None, help="基准语料目录（默认仓库 data/bench）")
+    bench.add_argument("--out", metavar="FILE", default=None, help="机读报告落点（默认只打人读摘要）")
+    bench.add_argument("--probe", metavar="NAME", default=None, help="探活：注入已知缺陷，基准必须报未达标（{}）".format("|".join(bench_mod.PROBES)))
+    bench.add_argument("--check", action="store_true", help="只做再生成位级一致校验（不改动冻结语料）")
     add_config_arg(bench)
-    bench.set_defaults(handler=_make_staged_handler("bench"))
+    bench.set_defaults(handler=cmd_bench)
 
     reconstruct = sub.add_parser("reconstruct", help="M3：before/after 差分还原（logs-only，不依赖 git）")
     reconstruct.add_argument("session", metavar="SESSION", help="会话引用（source:session_id 或日志路径）")

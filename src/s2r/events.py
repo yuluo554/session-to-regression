@@ -49,11 +49,24 @@ HARNESS_FINGERPRINTS: Dict[str, Tuple[str, ...]] = {
     "codex": ("payload",),
 }
 
-#: 版本指纹表：``{source: {版本号: (必需顶层键, ...)}}``。M1 闭环 R1–R3 后登记；
-#: 为空表示「本版本尚未宣称支持该 harness 的任何格式版本」→ 一律显式报错。
+#: 事件流 schema 版本（对外契约；字段集变化即升版）
+EVENT_SCHEMA_VERSION = 1
+
+#: 版本指纹表：``{source: {版本号: (必需键, ...)}}``，必需键由**本机全量实测**得出
+#: （见 data/README.md §六.1）。判据是"键集合"，不是某个版本号字符串——版本号字符串
+#: 随 agent 升级频繁变化，键集合变了才说明解析假设失效。
+#: Claude 看**顶层行**的键；Codex 看 `session_meta.payload` 的键（见 readers._version_views）。
 FORMAT_VERSION_FINGERPRINTS: Dict[str, Dict[str, FrozenSet[str]]] = {
-    "claude": {},
-    "codex": {},
+    "claude": {
+        # 实测：assistant/user 行恒带这些键（125 文件全量）
+        "cc-jsonl-1": frozenset({"type", "sessionId", "message", "timestamp", "uuid", "version"}),
+    },
+    "codex": {
+        # 实测：session_meta 的三种变体都带这组核心键（220 文件全量）
+        "codex-rollout-1": frozenset(
+            {"id", "session_id", "cli_version", "cwd", "timestamp", "model_provider", "originator", "source", "thread_source"}
+        ),
+    },
 }
 
 
@@ -128,39 +141,55 @@ def event_sort_key(event: Event) -> Tuple[str, str, int]:
     return (event.source, event.session_id, event.seq)
 
 
-def detect_harness(first_record: Mapping[str, Any]) -> str:
-    """按首行形态判别来源 harness；未知形态显式报错（不静默归到默认解析器）。"""
-    if not isinstance(first_record, Mapping):
-        raise UnsupportedFormat("首行不是 JSON 对象", missing_keys=("message", "payload"))
+def detect_harness(records: Any) -> str:
+    """按记录形态判别来源 harness；未知形态显式报错（不静默归到默认解析器）。
+
+    ``records`` 可以是单条记录，也可以是**探测窗口**（前 N 条）——因为实测里 Claude 文件的
+    首行常常是 UI 状态行（如只带 `sessionId`/`type` 的 meta 行），只看首行会误判为未知格式。
+    只要窗口内**任意一条**记录满足某个 harness 的判别键即判该 harness。
+    """
+    candidates = [records] if isinstance(records, Mapping) else [item for item in (records or []) if isinstance(item, Mapping)]
+    if not candidates:
+        raise UnsupportedFormat("没有可判别的 JSON 记录", missing_keys=("message", "payload"))
+
     matched: List[str] = []
     for source, required in sorted(HARNESS_FINGERPRINTS.items()):
-        if all(key in first_record for key in required):
+        if any(all(key in record for key in required) for record in candidates):
             matched.append(source)
     if len(matched) == 1:
         return matched[0]
-    keys = tuple(sorted(str(key) for key in first_record.keys()))
+
+    observed = sorted({str(key) for record in candidates for key in record.keys()})
     if not matched:
         raise UnsupportedFormat(
-            "无法判别日志来源：首行不含任何已知 harness 的判别键",
-            missing_keys=keys,
+            "无法判别日志来源：探测窗口内没有任何记录带已知 harness 的判别键",
+            missing_keys=tuple(observed),
             hint="已知判别键见 events.HARNESS_FINGERPRINTS",
         )
-    raise UnsupportedFormat("首行同时命中多个 harness: {}".format(", ".join(matched)), missing_keys=keys)
+    raise UnsupportedFormat("窗口内同时命中多个 harness: {}".format(", ".join(matched)), missing_keys=tuple(observed))
 
 
-def detect_format_version(source: str, first_record: Mapping[str, Any]) -> str:
-    """按版本指纹识别日志格式版本；登记表为空或键缺失即报 ``unsupported_format``。"""
+def detect_format_version(source: str, views: Any) -> str:
+    """按版本指纹识别日志格式版本；登记表为空或键缺失即报 ``unsupported_format``。
+
+    ``views`` = 供指纹比对的记录视图序列（Claude = 顶层行；Codex = session_meta 的 payload）。
+    只要**任意一条**视图满足某个版本的必需键集即判该版本；都不满足则报错并列出缺失键。
+    """
     table = FORMAT_VERSION_FINGERPRINTS.get(source, {})
     if not table:
         raise UnsupportedFormat(
-            "{} 的格式版本指纹尚未登记（M1 闭环 R1–R3 后登记）".format(source),
-            missing_keys=tuple(sorted(str(key) for key in first_record.keys())),
+            "{} 的格式版本指纹尚未登记".format(source),
+            missing_keys=("formats",),
         )
+    candidates = [views] if isinstance(views, Mapping) else list(views or [])
     for version, required in sorted(table.items()):
-        if all(key in first_record for key in required):
-            return version
-    present = tuple(sorted(str(key) for key in first_record.keys()))
+        for view in candidates:
+            if isinstance(view, Mapping) and all(key in view for key in required):
+                return version
+    union: FrozenSet[str] = frozenset().union(*table.values())
+    present: FrozenSet[str] = frozenset().union(*[set(view.keys()) for view in candidates]) if candidates else frozenset()
     raise UnsupportedFormat(
-        "{} 的日志格式版本不认识".format(source),
-        missing_keys=tuple(sorted(set().union(*table.values()) - set(present))),
+        "{} 的日志格式版本不认识（必需键集不匹配）".format(source),
+        missing_keys=tuple(sorted(union - present)),
+        hint="本工具只解析已实测过的格式；新版本请先核对字段并更新版本指纹表",
     )

@@ -1,0 +1,27 @@
+{
+  "episode_type": "ambiguous_old_string",
+  "expect": {
+    "event_count": 5,
+    "exit_codes": [],
+    "files_touched": [
+      "/demo/alpha/src/calc.py"
+    ],
+    "kind_counts": {
+      "tool_call": 2,
+      "tool_result": 2,
+      "user_msg": 1
+    },
+    "source": "claude",
+    "tools_used": [
+      "Bash",
+      "Edit"
+    ],
+    "user_report_fragments": [
+      "demo-user, bug: rounding is applied twice in /demo/alpha/src/calc.py"
+    ]
+  },
+  "expect_episodes": 1,
+  "input_file": "claude/ambiguous-old-string-1.jsonl",
+  "sample": "ambiguous-old-string-1",
+  "session_id": "sess-demo-0006"
+}

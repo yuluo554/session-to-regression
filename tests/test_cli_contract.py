@@ -15,7 +15,7 @@ from _tools import load_tool
 from s2r import cli, config, errors
 
 SMOKE = load_tool("ci_smoke")
-STAGED_ARGS = SMOKE.EXPECTED_DEFAULT_ARGS
+STAGED_ARGS = SMOKE.INVOCATIONS
 
 
 def test_version_and_help_exit_zero(capsys):
@@ -50,7 +50,7 @@ def test_config_without_subcommand_is_usage_error(capsys):
 
 def test_staged_commands_report_milestone_and_produce_nothing(capsys):
     """未交付命令：exit 4 + 报出所属里程碑 + **stdout 为空**（不伪造空结果）。"""
-    assert set(STAGED_ARGS) == set(cli.STAGED_COMMANDS)
+    assert set(STAGED_ARGS) == set(cli.registered_commands()) - {"selftest", "config"}
     for command in sorted(cli.STAGED_COMMANDS):
         code = cli.main([command] + list(STAGED_ARGS[command]))
         captured = capsys.readouterr()
@@ -130,8 +130,11 @@ def test_config_path_prints_resolved_file(config_path, capsys):
 
 
 def test_registered_commands_match_staged_map():
+    """已注册子命令 = 冒烟表覆盖的命令 ∪ 无参的两条；未交付的就是"已注册但不在已交付期望表"的那些。"""
     registered = set(cli.registered_commands())
-    assert registered == {"selftest", "config", *cli.STAGED_COMMANDS}
+    assert registered == set(SMOKE.INVOCATIONS) | {"selftest", "config"}
+    assert set(cli.STAGED_COMMANDS) <= registered
+    assert set(cli.STAGED_COMMANDS) == registered - set(SMOKE.DELIVERED_EXPECT) - {"selftest", "config"}
 
 
 def test_console_script_target_is_importable(repo_root):

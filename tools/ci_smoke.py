@@ -31,21 +31,31 @@ _SRC = str(REPO_ROOT / "src")
 if _SRC not in sys.path:
     sys.path.insert(0, _SRC)
 
-from s2r import errors, stdio  # noqa: E402  （需要先补 sys.path）
+from s2r import cli, errors, stdio  # noqa: E402  （需要先补 sys.path）
 
 BARE = "bare"
 MODULE = "module"
 
-#: 与子命令一一对应：covers = 被覆盖的子命令或 --version；form = 调用形态。
-#: 里程碑落地时：**在同一次提交里**改这里的期望退出码（阶段未就绪 4 → 真实语义），
-#: 并在 README 退出码表同步退役「阶段未就绪」那一行。
-EXPECTED_DEFAULT_ARGS = {
-    "scan": ["sample.jsonl"],
+#: 每个子命令的冒烟调用形态（covers = 被覆盖的子命令或 --version；form = 调用形态）。
+#: 期望退出码**自动推导**：仍在「阶段未就绪」表里的命令 = 4；已交付的必须在此登记真实期望值。
+#: 里程碑落地时：把命令从 `cli.STAGED_COMMANDS` 摘除 → 这里必须补一条 DELIVERED_EXPECT，
+#: 并且**在同一次提交里**退役 README 退出码表里对应的旧语义。
+INVOCATIONS = {
+    # 用**目录**而不是某个具体样本：语料文件名由确定性 RNG 在两种 harness 间选型，
+    # 写死文件名会在某次重生成后失效（首版实测：指向 claude/happy-path-1.jsonl，
+    # 而该样本被 RNG 分到了 codex/ 下 → 冒烟报 input_unavailable）。
+    "scan": ["data/bench/claude"],
     "bench": [],
     "reconstruct": ["sess-demo-0001"],
     "generate": ["sess-demo-0001#1"],
     "verify": ["sess-demo-0001#1"],
     "run": ["--target", "demo-target"],
+}
+
+#: 已交付命令的真实期望退出码（未交付的走 STAGED_COMMANDS → 4，由 build_smoke 推导）
+DELIVERED_EXPECT = {
+    "scan": errors.EXIT_OK,
+    "bench": errors.EXIT_OK,
 }
 
 
@@ -59,10 +69,17 @@ class Smoke(NamedTuple):
 
 def _staged_argv(command: str, form: str) -> Sequence[str]:
     head = ["s2r", command] if form == BARE else [sys.executable, "-m", "s2r", command]
-    return list(head) + list(EXPECTED_DEFAULT_ARGS[command])
+    return list(head) + list(INVOCATIONS[command])
 
 
-def build_smoke(any_staged: bool = True) -> List[Smoke]:
+def expected_exit(command: str) -> int:
+    """期望退出码：未交付 → 阶段未就绪；已交付 → 必须显式登记（否则 KeyError，逼你更新冒烟）。"""
+    if command in cli.STAGED_COMMANDS:
+        return errors.EXIT_STAGE_NOT_READY
+    return DELIVERED_EXPECT[command]
+
+
+def build_smoke() -> List[Smoke]:
     rows: List[Smoke] = []
     for form in (BARE, MODULE):
         head = ["s2r"] if form == BARE else [sys.executable, "-m", "s2r"]
@@ -70,11 +87,11 @@ def build_smoke(any_staged: bool = True) -> List[Smoke]:
         rows.append(Smoke("selftest", form, head + ["selftest"], errors.EXIT_OK, "自检全绿"))
         rows.append(Smoke("config", form, head + ["config", "show", "--json"], errors.EXIT_OK, "口径文件机读输出"))
         rows.append(Smoke("config", form, head + ["config", "path"], errors.EXIT_OK, "口径文件定位"))
-    for command in sorted(EXPECTED_DEFAULT_ARGS):
-        expect = errors.EXIT_STAGE_NOT_READY if any_staged else errors.EXIT_OK
-        note = "阶段未就绪（{}）".format(command) if any_staged else "已交付"
+    for command in sorted(INVOCATIONS):
+        staged = command in cli.STAGED_COMMANDS
+        note = "阶段未就绪（{}）".format(cli.STAGED_COMMANDS[command]) if staged else "已交付"
         for form in (BARE, MODULE):
-            rows.append(Smoke(command, form, _staged_argv(command, form), expect, note))
+            rows.append(Smoke(command, form, _staged_argv(command, form), expected_exit(command), note))
     return rows
 
 
@@ -107,9 +124,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     stdio.ensure_utf8_stdio()
     parser = argparse.ArgumentParser(prog="ci_smoke", description="离线 CI 冒烟（本机与 CI 同源）")
     parser.add_argument("--cwd", metavar="DIR", default=str(REPO_ROOT), help="在哪个目录跑（默认仓库根）")
-    parser.add_argument("--allow-staged", action="store_true", help="允许未交付子命令返回阶段未就绪（骨架期默认开）")
-    parser.add_argument("--no-staged", dest="allow_staged", action="store_false", help="要求所有子命令已交付（里程碑落地后使用）")
-    parser.set_defaults(allow_staged=True)
     args = parser.parse_args(list(argv) if argv is not None else sys.argv[1:])
 
     console_script = shutil.which("s2r")
@@ -119,7 +133,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return errors.EXIT_DEPENDENCY_MISSING
 
     cwd = Path(args.cwd)
-    rows = build_smoke(any_staged=args.allow_staged)
+    rows = build_smoke()
     failures = 0
     sys.stdout.write("console script: {}\n".format(console_script))
     sys.stdout.write("{:<4} {:<8} {:<12} {:<8} {:<8} {}\n".format("#", "form", "command", "expect", "actual", "verdict"))

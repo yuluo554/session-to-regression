@@ -1,0 +1,17 @@
+{
+  "episode_type": "unsupported_format",
+  "expect": {
+    "event_count": 0,
+    "exit_codes": [],
+    "files_touched": [],
+    "kind_counts": {},
+    "source": "claude",
+    "tools_used": [],
+    "user_report_fragments": []
+  },
+  "expect_episodes": null,
+  "expect_error": "unsupported_format",
+  "input_file": "invalid/unsupported-format-1.jsonl",
+  "sample": "unsupported-format-1",
+  "session_id": "sess-demo-0008"
+}

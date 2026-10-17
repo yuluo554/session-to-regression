@@ -99,10 +99,33 @@ def test_harness_detection_rejects_unknown_and_ambiguous_shapes():
         events.detect_harness(["not", "an", "object"])  # type: ignore[arg-type]
 
 
-def test_format_version_table_is_explicitly_empty_at_m0():
-    """M0 不宣称任何版本指纹：检测一律显式报错（不是“宽松解析”）。"""
+def test_format_version_fingerprints_are_registered_and_strict():
+    """M1 起指纹表按实测键集登记；不匹配即显式报错（绝不"宽松解析"）。"""
     assert set(events.FORMAT_VERSION_FINGERPRINTS) == {"claude", "codex"}
-    assert all(not table for table in events.FORMAT_VERSION_FINGERPRINTS.values())
+    assert all(table for table in events.FORMAT_VERSION_FINGERPRINTS.values()), "指纹表不得为空"
+
+    claude_views = [{"type": "user", "sessionId": "s", "message": {}, "timestamp": "t", "uuid": "u", "version": "v"}]
+    assert events.detect_format_version("claude", claude_views) == "cc-jsonl-1"
+
+    codex_views = [
+        {
+            "id": "i",
+            "session_id": "s",
+            "cli_version": "0.1",
+            "cwd": "/demo",
+            "timestamp": "t",
+            "model_provider": "p",
+            "originator": "o",
+            "source": "cli",
+            "thread_source": "user",
+        }
+    ]
+    assert events.detect_format_version("codex", codex_views) == "codex-rollout-1"
+
     with pytest.raises(UnsupportedFormat) as excinfo:
-        events.detect_format_version("claude", {"type": "user", "message": {}})
-    assert "M1" in str(excinfo.value)
+        events.detect_format_version("claude", [{"type": "user", "message": {}}])
+    assert excinfo.value.code == "unsupported_format"
+    assert excinfo.value.missing_keys, "报错必须列出缺失键"
+
+    with pytest.raises(UnsupportedFormat):
+        events.detect_format_version("unknown-harness", [{}])

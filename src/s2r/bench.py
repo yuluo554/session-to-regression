@@ -1,0 +1,283 @@
+"""M1 基准：合成语料 + 植入真值的**对账器**（双边门 + 逐样本点名 + 探活）。
+
+三个不能省的形态（方法论里踩过坑的那几条）：
+
+1. **门是双边**：既守**检出率**（真值声明的事实必须对上），也守**误报 0**（该报错的样本必须
+   真报错）。只守一边的门，在读取器整体失效时照样全绿——"没有误报"不等于"检出到了"。
+2. **逐样本点名**：差异落到**具体样本 + 具体字段**，不许汇总率掩盖"某一类全零"。
+3. **探活（`--probe`）**：往对账的输入里注入一个已知缺陷，基准**必须**报未达标；
+   没报出来就是基准自己失灵（这时退出码是 1，把"基准失灵"和"数据没对上"都变成可见事件）。
+
+另加一条台账纪律：语料与真值的 sha256 **逐份对账**（冻结物被改过就红），
+这就把"字节即契约"从口号变成可执行检查。
+"""
+
+from __future__ import annotations
+
+import json
+from collections import Counter
+from pathlib import Path
+from typing import Any, Dict, List, Mapping, Optional, Sequence
+
+from . import benchdata, events, readers, serialize
+from .errors import InputUnavailable, UnsupportedFormat
+
+MANIFEST_NAME = benchdata.MANIFEST_NAME
+
+#: 探活名：向"读到的实际事实"注入缺陷，基准必须检出
+PROBES = ("drop-tool", "zero-events", "drop-exit-code", "accept-unknown")
+
+#: 对账的字段集（与 manifest 的 checked_facts 对应；episodes 属 M2，见 pending_facts）
+CHECKED_FACTS = (
+    "source",
+    "format_version",
+    "event_count",
+    "kind_counts",
+    "tools_used",
+    "files_touched",
+    "exit_codes",
+    "user_report_fragments",
+)
+
+
+def load_manifest(data_dir: Path) -> Mapping[str, Any]:
+    path = data_dir / MANIFEST_NAME
+    if not path.is_file():
+        raise InputUnavailable(
+            "基准 manifest 不存在: {}".format(path),
+            hint="先运行 python tools/gen_bench.py 生成合成语料",
+        )
+    try:
+        manifest = json.loads(serialize.read_text(path))
+    except ValueError as exc:
+        raise InputUnavailable("基准 manifest 不是合法 JSON: {}: {}".format(path, exc))
+    for key in ("bench_version", "coverage", "thresholds", "samples", "checked_facts"):
+        if key not in manifest:
+            raise InputUnavailable("基准 manifest 缺键: {}".format(key))
+    if not manifest["samples"]:
+        raise InputUnavailable("基准 manifest 的 samples 为空（扫描面为空会让门永远绿）")
+    return manifest
+
+
+def _facts(file_read: readers.FileRead, expected: Mapping[str, Any]) -> Dict[str, Any]:
+    """从读取结果里算出**可对账的事实**（只算，不判定）。"""
+    kinds: Counter = Counter(event.kind for event in file_read.events)
+    tools: List[str] = []
+    files: List[str] = []
+    exit_codes: List[int] = []
+    user_texts: List[str] = []
+    for event in file_read.events:
+        if event.kind == "tool_call" and event.tool != events.UNKNOWN and event.tool not in tools:
+            tools.append(event.tool)
+        if event.path != events.UNKNOWN and event.path not in files:
+            files.append(event.path)
+        if event.kind == "tool_result":
+            code = event.payload.get("exit_code")
+            if isinstance(code, int) and not isinstance(code, bool):
+                exit_codes.append(code)
+        if event.kind == "user_msg":
+            text = event.payload.get("text")
+            if isinstance(text, str):
+                user_texts.append(text)
+    declared_fragments = expected.get("user_report_fragments") or []
+    matched_fragments = [fragment for fragment in declared_fragments if any(fragment in text for text in user_texts)]
+    return {
+        "source": file_read.source,
+        "format_version": file_read.format_version,
+        "event_count": len(file_read.events),
+        "kind_counts": {kind: kinds[kind] for kind in sorted(kinds)},
+        "tools_used": tools,
+        "files_touched": files,
+        "exit_codes": exit_codes,
+        "user_report_fragments": matched_fragments,
+    }
+
+
+def compare(expected: Mapping[str, Any], actual: Mapping[str, Any]) -> List[str]:
+    """逐字段比对，差异带上字段名与两边取值（点名到字段，不只是"不一致"）。"""
+    mismatches: List[str] = []
+    for field in CHECKED_FACTS:
+        if field not in expected:
+            continue
+        want, got = expected[field], actual.get(field)
+        if want != got:
+            mismatches.append("{}: 期望 {!r}，实际 {!r}".format(field, want, got))
+    return mismatches
+
+
+def _apply_probe(probe: Optional[str], actual: Dict[str, Any]) -> Dict[str, Any]:
+    if probe == "drop-tool":
+        if actual["tools_used"]:
+            actual["tools_used"] = actual["tools_used"][:-1]
+    elif probe == "zero-events":
+        actual["event_count"] = 0
+        actual["kind_counts"] = {}
+    elif probe == "drop-exit-code":
+        actual["exit_codes"] = []
+    return actual
+
+
+def run(
+    data_dir: Path,
+    limits: Mapping[str, Any],
+    only: Optional[Sequence[str]] = None,
+    probe: Optional[str] = None,
+) -> Dict[str, Any]:
+    """跑一次基准对账，返回机读报告。"""
+    if probe is not None and probe not in PROBES:
+        raise InputUnavailable("未知探活名: {}（可用: {}）".format(probe, ", ".join(PROBES)))
+    manifest = load_manifest(data_dir)
+    thresholds = manifest["thresholds"]
+    min_rate = float(thresholds["min_detection_rate"])
+    max_false_positive = int(thresholds["max_false_positive"])
+
+    ledger_mismatches: List[str] = []
+    missing_files: List[str] = []
+    sample_reports: List[Dict[str, Any]] = []
+    type_counts: Counter = Counter()
+    checked = matched = 0
+    false_positives: List[str] = []
+
+    # **作用域分工**：完整性类门（台账 sha256 / 文件在位 / 覆盖度）看**全量语料**——
+    # 它们描述的是语料的完整性，不该被 `--only`（调试用筛选）缩小；
+    # 判定类门（检出率 / 误报）只看被选中的样本。缩小完整性门的扫描面 = 让门漏检。
+    for sample in manifest["samples"]:
+        type_counts[sample["episode_type"]] += 1
+        sample_path = data_dir / sample["file"]
+        truth_path = data_dir / sample["truth"]
+        if not sample_path.is_file() or not truth_path.is_file():
+            missing_files.append(sample["sample"])
+            continue
+        if serialize.sha256_bytes(sample_path.read_bytes()) != sample["sha256"]:
+            ledger_mismatches.append("{}: 语料 sha256 与台账不符".format(sample["file"]))
+        if serialize.sha256_bytes(truth_path.read_bytes()) != sample["truth_sha256"]:
+            ledger_mismatches.append("{}: 真值 sha256 与台账不符".format(sample["truth"]))
+        if only and sample["sample"] not in only and sample["episode_type"] not in only:
+            continue
+        _check_sample(data_dir, sample, limits, probe, sample_reports, false_positives)
+        checked += 1
+        if sample_reports[-1]["status"] in ("pass", "error_ok"):
+            matched += 1
+
+    coverage_missing = []
+    for episode_type, minimum in sorted(manifest["coverage"]["min_count_by_type"].items()):
+        observed = type_counts.get(episode_type, 0)
+        if observed < int(minimum):
+            coverage_missing.append("{}: 需要 ≥{}，实际 {}".format(episode_type, minimum, observed))
+
+    detection_rate = (float(matched) / checked) if checked else 0.0
+    gates = {
+        "coverage": {"ok": not coverage_missing, "missing": coverage_missing},
+        "detection": {
+            "ok": checked > 0 and detection_rate >= min_rate,
+            "rate": round(detection_rate, 6),
+            "min_rate": min_rate,
+            "matched": matched,
+            "checked": checked,
+        },
+        "false_positive": {"ok": len(false_positives) <= max_false_positive, "count": len(false_positives), "max": max_false_positive, "samples": sorted(false_positives)},
+        "ledger": {"ok": not ledger_mismatches, "mismatches": sorted(ledger_mismatches)},
+        "files_present": {"ok": not missing_files, "missing": sorted(missing_files)},
+    }
+    all_ok = checked > 0 and all(gate["ok"] for gate in gates.values())
+    report: Dict[str, Any] = {
+        "bench_version": manifest["bench_version"],
+        "data_dir": str(data_dir),
+        "probe": probe or "",
+        "samples": sample_reports,
+        "gates": gates,
+        "coverage": {"observed_count_by_type": dict(sorted(type_counts.items())), "min_count_by_type": manifest["coverage"]["min_count_by_type"]},
+        "pending_facts": manifest.get("pending_facts", {}),
+        "checked_facts": list(CHECKED_FACTS),
+        "status": "ok" if all_ok else "not_met",
+    }
+    if probe:
+        # 探活模式：状态取反——"注入的缺陷被检出"才是成功
+        report["probe_detected"] = not all_ok
+        report["status"] = "probe_detected" if not all_ok else "probe_not_detected"
+    return report
+
+
+def _check_sample(
+    data_dir: Path,
+    sample: Mapping[str, Any],
+    limits: Mapping[str, Any],
+    probe: Optional[str],
+    sample_reports: List[Dict[str, Any]],
+    false_positives: List[str],
+) -> None:
+    """对账单个样本：期望报错的样本必须报错；其余样本逐字段核对。"""
+    name = sample["sample"]
+    episode_type = sample["episode_type"]
+    sample_path = data_dir / sample["file"]
+    truth_path = data_dir / sample["truth"]
+    truth = json.loads(truth_path.read_bytes().decode("utf-8"))
+    expected = truth.get("expect") or {}
+    expect_error = truth.get("expect_error")
+
+    if expect_error:
+        if probe == "accept-unknown":
+            # 探活：模拟"读取器不再拒绝未知格式、静默成功"这一缺陷。
+            # 注入打在**判定路径**上（记为误报），而不是"直接记通过"——后者会把门骗过去，
+            # 让探活自己变成假门（首版就是这么写的，四个探活里它唯一没被检出）。
+            false_positives.append(name)
+            sample_reports.append(
+                {
+                    "sample": name,
+                    "episode_type": episode_type,
+                    "status": "false_positive",
+                    "mismatches": ["探活注入：本应报 {} 却静默成功".format(expect_error)],
+                }
+            )
+            return
+        try:
+            readers.read_file(sample_path, limits)
+        except UnsupportedFormat as exc:
+            ok = exc.code == expect_error
+            sample_reports.append(
+                {"sample": name, "episode_type": episode_type, "status": "error_ok" if ok else "fail", "mismatches": [] if ok else ["错误码不符: {}".format(exc.code)]}
+            )
+        except Exception as exc:  # 其它异常同样算"报错形态不符"
+            sample_reports.append({"sample": name, "episode_type": episode_type, "status": "fail", "mismatches": ["非预期异常: {}".format(type(exc).__name__)]})
+        else:
+            false_positives.append(name)
+            sample_reports.append({"sample": name, "episode_type": episode_type, "status": "false_positive", "mismatches": ["该样本应报 {}，却读成功".format(expect_error)]})
+        return
+
+    try:
+        file_read = readers.read_file(sample_path, limits)
+    except Exception as exc:
+        sample_reports.append({"sample": name, "episode_type": episode_type, "status": "fail", "mismatches": ["读取失败: {}: {}".format(type(exc).__name__, exc)]})
+        return
+
+    actual = _apply_probe(probe, _facts(file_read, expected))
+    mismatches = compare(expected, actual)
+    sample_reports.append({"sample": name, "episode_type": episode_type, "status": "pass" if not mismatches else "fail", "mismatches": mismatches})
+
+
+def summary_lines(report: Mapping[str, Any]) -> List[str]:
+    """人读摘要（机读报告另存）。"""
+    lines = []
+    gates = report["gates"]
+    lines.append(
+        "bench: {}（样本 {}，检出率 {}/{} = {:.2f}，误报 {}）".format(
+            report["status"],
+            len(report["samples"]),
+            gates["detection"]["matched"],
+            gates["detection"]["checked"],
+            gates["detection"]["rate"],
+            gates["false_positive"]["count"],
+        )
+    )
+    for name in ("coverage", "ledger", "files_present"):
+        if not gates[name]["ok"]:
+            lines.append("  [FAIL] {}: {}".format(name, gates[name].get("missing") or gates[name].get("mismatches")))
+    if report.get("probe"):
+        lines.append("  probe={} detected={}".format(report["probe"], report.get("probe_detected")))
+    for item in report["samples"]:
+        if item["status"] not in ("pass", "error_ok"):
+            lines.append("  [{}] {}: {}".format(item["status"], item["sample"], "; ".join(item["mismatches"])))
+    pending = report.get("pending_facts") or {}
+    if pending:
+        lines.append("  pending（未对账，不当作通过）: {}".format(", ".join(sorted(pending))))
+    return lines

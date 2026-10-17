@@ -26,6 +26,10 @@ id_format = "{session_id}#{first_fix_seq}"
 # 会话安全阀：超限显式报错，绝不静默截断（截断会让 episode 起点漂移）
 max_events_per_session = 200000
 max_line_bytes = 4194304
+# tool_result 文本保留上限（超出即截断，并在事件里显式标 truncated=true）
+max_result_chars = 4000
+# 格式版本指纹探测：读前 N 行找首个命中指纹的记录
+version_probe_lines = 200
 
 [verify]
 # M5 RED/GREEN 双验证（临时副本内进行，不碰用户工作区）

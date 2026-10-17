@@ -39,6 +39,8 @@ SCHEMA: Sequence[Tuple[str, type]] = (
     ("episode.id_format", str),
     ("episode.max_events_per_session", int),
     ("episode.max_line_bytes", int),
+    ("episode.max_result_chars", int),
+    ("episode.version_probe_lines", int),
     ("verify.timeout_seconds", int),
     ("verify.tmpdir_prefix", str),
     ("verify.pytest_command", list),
@@ -54,7 +56,13 @@ SCHEMA: Sequence[Tuple[str, type]] = (
 )
 
 #: 必须为正整数的键（≥1）
-POSITIVE_KEYS = ("episode.max_events_per_session", "episode.max_line_bytes", "verify.timeout_seconds")
+POSITIVE_KEYS = (
+    "episode.max_events_per_session",
+    "episode.max_line_bytes",
+    "episode.max_result_chars",
+    "episode.version_probe_lines",
+    "verify.timeout_seconds",
+)
 
 #: 必须为非负整数的键（≥0）
 NON_NEGATIVE_KEYS = (

@@ -36,6 +36,16 @@ def dumps_json(obj: Any) -> str:
     return text.replace("\r\n", "\n")
 
 
+def dumps_json_line(obj: Any) -> str:
+    """单行 JSON（jsonl 用）：**不缩进**，一对象一行 —— 与 dumps_json 是两种契约。
+
+    为什么必须分开：jsonl 的"行"就是记录边界，缩进会把一条记录摊成多行，
+    读取器按行解析立刻失败（本项目 M1 实测：用 dumps_json 生成的合成语料整个读不了）。
+    """
+    text = json.dumps(obj, sort_keys=True, ensure_ascii=False)
+    return text.replace("\r\n", "\n").replace("\n", " ") + TRAILING_NEWLINE
+
+
 def write_text_atomic(path: Union[str, Path], text: str) -> Path:
     """原子写文本（UTF-8、LF）。返回目标路径。"""
     target = Path(path)

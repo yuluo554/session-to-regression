@@ -48,7 +48,7 @@
 | 项 | 实测结果 |
 |---|---|
 | 路径 | `~/.claude/projects/<project-slug>/<session-uuid>.jsonl`（`<project-slug>` 由 cwd 变形，如 `D--ProgramData-claude-code`） |
-| 规模 | **94 个会话 / 43.2 MB** |
+| 规模 | **94 个会话 / 43.2 MB**（出题期快照；M1 复核时为 125 个文件——属**快照漂移**，结论不变，见 §六.1） |
 | 顶层 `type` | 题面所依据的实测：存在 `assistant` / `user` 行与 `file-history-snapshot` 行；**完整枚举以 M1 全量聚合为准**（⬜ 不在本题出题阶段宣称完整清单） |
 | 工具调用 | `message.content[]` 内 `{"type":"tool_use","name":…,"input":…}`；结果侧 `{"type":"tool_result"}`，行级 `toolUseResult` |
 | Edit 形态 | **252 次，252/252 全部带 `file_path` + `old_string` + `new_string`** → before/after 的文本级底座 |
@@ -87,13 +87,13 @@
 | 本地定位 | `~/.claude/projects/D--ProgramData-claude-code/<session>.jsonl`（session id 前缀 `9df592e7`，**完整 id 不入仓**） |
 | 用途 | 人工抽验与演示；**不复制进仓库**，不在文档中记录真实绝对路径 |
 
-### 2.5 ⬜ 待核对字段清单（M1 数据先行必须闭环）
+### 2.5 ⬜ 待核对字段清单（M1 数据先行必须闭环）——**M1 已闭环，结论见 §六**
 
 | # | 待核对项 | 三态 | 影响 | 闭环方式 |
 |---|---|---|---|---|
-| R1 | Codex `apply_patch` 载荷内的**文件路径字段**（在 JSON arguments 里还是在 patch 文本指令行内？） | ⬜ 待核对 | M1 → M3：路径提取错则 episode 关联全错 | M1 全量逐样本核对，记录键集与路径形态分布 |
-| R2 | Claude `MultiEdit` 的**字段形态**（本机是否出现？`edits[]` 结构？） | ⬜ 待核对 | M1 → M4：解析不到多段编辑会漏 episode | M1 全量工具名聚合；未出现则登记"本机 0 次"并保留降级语义 |
-| R3 | Codex `exec` 的**失败判定字段语义**（退出码在哪个键？如何区分命令失败与工具失败？） | ⬜ 待核对 | M2：失败信号判定错则切分全错 | M1 取成功/失败样本各若干，逐字段对比 |
+| R1 | Codex `apply_patch` 载荷内的**文件路径字段**（在 JSON arguments 里还是在 patch 文本指令行内？） | ✅ **已核对**（结论：只在 patch 文本指令行内，JSON 侧无独立路径键） | M1 → M3：路径提取错则 episode 关联全错 | 全量 104 次 patch 逐样本核对键集与指令行枚举 → §六.2 |
+| R2 | Claude `MultiEdit` 的**字段形态**（本机是否出现？`edits[]` 结构？） | ✅ **已核对**（结论：本机全量 0 次） | M1 → M4：解析不到多段编辑会漏 episode | 全量 125 文件工具名聚合 → §六.3 |
+| R3 | Codex `exec` 的**失败判定字段语义**（退出码在哪个键？如何区分命令失败与工具失败？） | ✅ **已核对**（结论：无独立退出码键，信号在 `output` 文本内且**必须取数值**） | M2：失败信号判定错则切分全错 | 全量 3905 条 `function_call_output` 键集与输出形态聚合 → §六.4 |
 
 > **纪律**：R1–R3 任一未闭环，对应字段只能落 `unknown` 或整条跳过，**不得进入 M2 判定路径**，更不得进入 M4 生成路径。核对结论回填本表并改为 ✅，同时补齐"样本出处（脱敏描述）+ 结论 + 口径"三列内容。
 
@@ -145,8 +145,127 @@
 
 | # | 项 | 状态 | 闭环里程碑 |
 |---|---|---|---|
-| R1 | Codex `apply_patch` 载荷内文件路径字段 | ⬜ 待核对 | M1 |
-| R2 | Claude `MultiEdit` 字段形态 | ⬜ 待核对 | M1 |
-| R3 | Codex `exec` 失败判定字段语义 | ⬜ 待核对 | M1 |
-| R4 | 合成日志覆盖度门槛具体数值 | ⬜ 待定 | M1（写进 manifest） |
+| R1 | Codex `apply_patch` 载荷内文件路径字段 | ✅ 已核对（结论见 §六.2） | M1 |
+| R2 | Claude `MultiEdit` 字段形态 | ✅ 已核对：全量 0 次，保留降级语义（§六.3） | M1 |
+| R3 | Codex `exec` 失败判定字段语义 | ✅ 已核对（结论见 §六.4） | M1 |
+| R4 | 合成日志覆盖度门槛具体数值 | ⬜ 待定 | M1（写进 `data/bench/manifest.json`） |
 | R5 | 真实样本量的最终表述（5 强 / 29 弱）是否随复核变化 | ⬜ 待复核 | M1（只更新快照，不改承诺） |
+
+---
+
+## 六、M1 数据先行核对结论与勘误（✅ 2026-10-17，本机全量实测）
+
+**范围**：本次核对为**全量**（非抽样）——本机 `~/.claude/projects/**/*.jsonl` **125 个文件**、
+`~/.codex/sessions/**/*.jsonl` **220 个文件**，逐行 JSON 解析后按键聚合。
+**方法**：一次性只读探针（落在仓库树外），只聚合**结构信息**（键名集合 / 计数 / 形态）；
+探针不写任何文件、不复制日志内容。
+**隐私**：下表**只有结构信息与计数**，不含真实代码、真实路径、真实 session id。
+
+### 6.1 行类型与键集枚举（全量）
+
+**Claude（125 文件）** 顶层 `type` 分布：`assistant 7218`、`user 3604`、`attachment 2145`、
+`last-prompt 854`、`ai-title 513`、`mode 492`、`permission-mode 462`、`system 257`、
+`queue-operation 137`、`file-history-snapshot 123`、`file-history-delta 56`、`atis-latch 50`、
+`started 25`、`result 25`、`cost-state 16`。
+
+* 行级键（`assistant`）：`cwd, effort, entrypoint, gitBranch, isSidechain, message, parentUuid, sessionId, timestamp, type, userType, uuid, version`
+* 行级键（`user`）多出：`toolUseResult`（结果侧）、`promptId`、`session_id`、`sourceToolAssistantUUID`
+* `message.content[]` 块类型：`tool_use 3389`、`tool_result 3386`、`thinking 2463`、`text 1366`、`image 1`
+* **写文件类工具（全量）**：`Edit 263`、`Write 128`、`MultiEdit 0`、`NotebookEdit 0`
+* `toolUseResult.type` 分布：**键缺失 1609**、`text 514`、`create 82`、`image 14`、`update 4`、`file_unchanged 1`
+
+**Codex（220 文件）** 顶层 `type` 分布：`event_msg 65197`、`response_item 50599`、`turn_context 1258`、
+`world_state 966`、`inter_agent_communication_metadata 669`、`session_meta 220`、`compacted 92`、
+`token_usage_record 7` ——**行级键恒为** `ordinal, payload, timestamp, type`。
+
+* `payload.type` 分布（前 12）：`token_count 37500`、`item_completed 24583`、`reasoning 15645`、
+  `custom_tool_call 10197`、`custom_tool_call_output 10194`、`message 6020`、`function_call 3908`、
+  `function_call_output 3905`、**键缺失 3212**、`task_started 1205`、`task_complete 941`、`agent_message 669`
+* `session_meta.payload` 核心键：`id, session_id, cli_version, cwd, timestamp, model_provider,
+  originator, source, thread_source`（在实测的三种变体里都出现）→ 用作**版本指纹**的必需键集
+* 命令/工具调用侧 `function_call.name` 计数：`wait_agent 1258`、`wait 916`、`js 576`、
+  `send_message 309`、**`shell_command 271`**、`spawn_agent 158`、**`exec_command 93`**、`list_agents 86`
+
+### 6.2 R1 结论：Codex 路径字段
+
+* `custom_tool_call` 的 payload 键集**唯一形态**：`call_id, id, input, internal_chat_message_metadata_passthrough, name, status, type`
+  ——**没有独立的文件路径字段**；路径**只在 `input`（字符串）的 patch 指令行里**。
+* 全量 104 次 `apply_patch` 的指令行枚举：`*** Begin Patch` 104、`*** End Patch` 104、
+  `*** Update File: <path>` 85、`*** Add File: <path>` 71、**`*** Move to: <path>` 15**。
+* 路径形态两种都在用：**Windows 绝对路径**（盘符开头）与**相对路径**；可出现**中文/非 ASCII 文件名**。
+* 一次 patch 涉及文件数分布：1 个 74 次、2 个 11、3 个 7、4 个 7、11 个 1、**30 个 1** → **多文件 patch 是真实形态**，必须逐文件切分。
+* patch 调用结果 `custom_tool_call_output` 形态：104/104 有 `output`，正文形如
+  `Exit code: <N>\nWall time: …\nOutput:\nSuccess. Updated the following files:\nA <path>\nM <path>`
+  （`A`/`M`/`D` 前缀分别表示新增/修改/删除，可作为路径与动作的第二来源）。
+
+### 6.3 R2 结论：Claude `MultiEdit`
+
+* **全量 125 文件内 `MultiEdit` 出现 0 次**（`Edit 263` / `Write 128` 是实际形态）。
+* 处置（按"本机 0 次出现的形态同样不编造"）：解析器把 `MultiEdit` 登记为**已知工具名占位**；
+  一旦出现，按"单次编辑"的保守语义降级处理并**计入 ParseNote**（显式可见，不静默丢弃），
+  **不猜测 `edits[]` 的字段形态**。
+* `Edit` 的 input 键集唯一形态：`file_path, new_string, old_string, replace_all`；
+  `Write`：`content, file_path`。
+
+### 6.4 R3 结论：Codex 命令失败的判定字段
+
+* `function_call_output` 键集只有两种：`call_id, id, internal_chat_message_metadata_passthrough, output, type`（3785）
+  与去掉 `id` 的变体（120）→ **没有 `exit_code` / `status` / `metadata` 字段**。
+* 失败信号只在 `output` 字符串里，两种格式：
+  * `Chunk ID: …\nWall time: …\nProcess exited with code <N>\nOriginal token count: …\nOutput:\n<正文>`（命令类）
+  * `Exit code: <N>\nWall time: …\nOutput:\n<正文>`（`apply_patch` 类）
+* 标记字符串计数（仅作形态统计）：`Exit code` 664、`Process exited` 90、`exited with code` 90、
+  `Script failed` 45、`Traceback` 3、`FAILED` 2。
+* ⚠️ **判定必须取数值再比较（N≠0），不能按标记字符串命中**：`Process exited with code 0` 同样命中标记，
+  按字符串判会把大量成功当失败。
+* 命令文本的参数键名**不统一**：`shell_command` → `command`（271 次）；`exec_command` → `cmd`（93 次）；
+  两者都带 `workdir`。测试命令检出必须同时认这两个键。
+
+### 6.5 勘误表（出题期认知 → 实测）
+
+| # | 出题期写法 | 实测结论 | 影响与处置 |
+|---|---|---|---|
+| E1 | "`toolUseResult.type == "update"` 带 `structuredPatch` + `originalFile`，抽样 4/4" | 全量：`type == "update"` **仅 4 条**；带 `structuredPatch` 键的结果 **305 条**（其中非空 223、空 82），其中 **107 条同时带 `originalFile`**，而这些结果的 `type` 键**多数缺失**（键缺失 219 条） | **判据改为按"键存在"判定**，不得写 `type == "update"`（否则 305 条里会漏掉 301 条）。抽样 4/4 结论**方向正确、判据错误**——这正是"抽样不足以下判据"的实例 |
+| E2 | "Codex 的工具调用是 `function_call`（如 `exec`）" | 本机 **没有名为 `exec` 的工具**；命令类实测为 `shell_command` / `exec_command`；`exec` 只作为 patch 结果文本里的 `Exit code` 字样出现 | M1/M2 按实测工具名匹配；文档与代码不得写 `exec` 作为工具名 |
+| E3 | "patch 指令行 `*** Begin Patch / *** Update File / *** Add File / *** Delete File`" | 实测另有 **`*** Move to: <path>` 15 次**（题面未提）；本次样本未出现 `*** Delete File` | 解析器按**实测全集**支持（含 Move to），未出现的形态保留分支并计注记；**不宣称**未实测形态已支持 |
+| E4 | "Claude 顶层 `type` 行与 `file-history-snapshot` 行" | 全量共 **15 种**顶层 `type`（见 §6.1） | 版本指纹只对**必需键**做承诺，其余类型按"非事件行"跳过并计注记（不静默丢弃） |
+| E5 | "060 次 Edit 全带 file_path+old_string+new_string（252/252）" | 全量 `Edit 263` / `Write 128`（数量随使用增长，属快照漂移，非结论变化） | 计数类表述一律标注基准日；**结论（字段齐全）不变** |
+
+### 6.6 口径增量（M1 起生效，写入既有 K 清单）
+
+* **K14**：Claude 的 before-image 判据 = "`structuredPatch`/`originalFile` **键存在**"，不是 `type` 字段值（E1）。
+* **K15**：Codex 命令工具名按实测集合匹配（`shell_command` / `exec_command`），命令文本键 `command` 与 `cmd` 都要认（E2/R3）。
+* **K16**：失败判定只在**数值**上做（`Exit code N` / `Process exited with code N`，N≠0）；标记字符串命中不等于失败（R3）。
+* **K17**：patch 指令集以实测全集为准（含 `*** Move to:`），未实测形态保留分支并计注记（E3）。
+
+### 6.7 R1 补充：Codex 还有一条**结构化**的文件变更通道（实测，1892 条）
+
+`payload.type == "item_completed"` 的 `item` 有 8 种类型：`AgentMessage 8529`、`Reasoning 8418`、
+`SubAgentActivity 3377`、**`FileChange 1892`**、`McpToolCall 1136`、`UserMessage 973`、`WebSearch 151`、
+`ContextCompaction 92`。其中 `FileChange` 的形态是：
+
+* `item.status` 恒为 `completed`（实测 1892/1892）；
+* `item.changes` 是 **dict：路径 → 变更对象**（1892/1892 都是 dict，**不是列表**）；
+* 变更对象的键只有两种形态：`{type, content}`（1274 个，新增文件 → 全量正文）与
+  `{type, unified_diff, move_path}`（2347 个，修改/移动 → **统一 diff**）；
+* 路径键是**完整路径**（绝对或相对），与 `apply_patch` 指令行里的路径同源。
+
+**处置（M1 起）**：
+* 读取器把 `FileChange` 作为**结果侧事件**纳入事件流（`kind=tool_result`、`tool=file_change`、
+  payload 携带 `files`），**不承诺**与某次 `apply_patch` 调用配对（该通道**没有 call_id**，
+  按时间序配对属于猜测，猜测不做）；
+* **M3 的还原优先级因此更新**：Codex 侧首选 `FileChange.changes[*].unified_diff`（结构化、带路径），
+  `*** Begin Patch` 文本解析降为**第二来源**（用于该通道缺失时的兜底）；
+* `item_completed` 里的 `AgentMessage 8529` / `UserMessage 973` 与 `response_item` 的 `message`
+  是**重复通道** → 读取器**只取一条**（实测选定 `response_item` 的 `message`），另一条按注记跳过，
+  避免同一句话在事件流里出现两次。
+
+### 6.8 用户消息的载体形态（实测，写入解析器契约）
+
+* **Claude**：用户文本消息以 `message.content` 为**字符串**的形态出现（200 条）；
+  `content` 为列表且含 `text` 块的只有 18 条；列表形态绝大多数是 `tool_result`（3386 条）。
+  → 解析器**两种形态都要认**（字符串 → `user_msg`；列表 → 逐块分流）。
+* **Codex**：用户消息在 `payload.type == "message"` 且 `payload.role == "user"` 上
+  （`role` 取值实测：`assistant 3552` / `user 1543` / `developer 925`），`content` 是
+  `[{type: "text", text: …}]` 的列表；`role == "developer"` 是系统/开发者指令，**不是用户报告**，
+  单列为 `meta` 侧信息（不参与"用户报 bug"判定）。

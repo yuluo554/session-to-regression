@@ -13,7 +13,7 @@ SMOKE = load_tool("ci_smoke")
 
 
 def _covers_forms():
-    rows = SMOKE.build_smoke(any_staged=True)
+    rows = SMOKE.build_smoke()
     table = {}
     for row in rows:
         table.setdefault(row.covers, set()).add(row.form)
@@ -28,23 +28,32 @@ def test_every_registered_command_is_smoke_covered_in_both_forms():
         assert forms == {SMOKE.BARE, SMOKE.MODULE}, "{} 缺调用形态: {}".format(command, sorted(forms))
 
 
-def test_every_staged_command_has_a_real_invocation_in_the_smoke_table():
+def test_every_subcommand_has_a_real_invocation_in_the_smoke_table():
     """冒烟的 argv 必须是可真跑的形态（不能只写命令名导致 argparse 报错被误判为契约）。"""
-    assert set(SMOKE.EXPECTED_DEFAULT_ARGS) == set(cli.registered_commands()) - {"selftest", "config"}
-    for command, args in sorted(SMOKE.EXPECTED_DEFAULT_ARGS.items()):
+    assert set(SMOKE.INVOCATIONS) == set(cli.registered_commands()) - {"selftest", "config"}
+    for command, args in sorted(SMOKE.INVOCATIONS.items()):
         for form in (SMOKE.BARE, SMOKE.MODULE):
             argv = list(SMOKE._staged_argv(command, form))
             assert command in argv, argv
             assert "--config" not in argv  # 默认定位口径文件（显式传会掩盖定位缺陷）
 
 
-def test_staged_expectation_is_the_retirement_contract():
-    """骨架期期望值 = 阶段未就绪；里程碑落地时这条断言会红——它就是"退役待办"的机器提醒。"""
-    rows = SMOKE.build_smoke(any_staged=True)
+def test_expectations_follow_the_stage_table_exactly():
+    """期望退出码与「阶段未就绪」表严格对应：已交付命令必须在 DELIVERED_EXPECT 里显式登记。
+
+    这条断言就是"退役待办"的机器提醒——把命令从 STAGED_COMMANDS 摘除却不登记真实期望时，
+    `expected_exit` 当场 KeyError，测试同步变红（不会把 4 静默当成契约）。
+    """
+    rows = SMOKE.build_smoke()
     staged_rows = [row for row in rows if row.covers in cli.STAGED_COMMANDS]
     assert staged_rows, "没有覆盖到任何未交付命令"
     assert {row.expect_exit for row in staged_rows} == {errors.EXIT_STAGE_NOT_READY}
-    assert {row.covers for row in staged_rows} == set(cli.STAGED_COMMANDS)
+
+    delivered = set(cli.registered_commands()) - set(cli.STAGED_COMMANDS) - {"selftest", "config"}
+    assert delivered, "已交付命令集合为空（扫描面异常）"
+    assert set(SMOKE.DELIVERED_EXPECT) == delivered, "已交付命令必须逐个登记真实期望退出码"
+    for command in sorted(delivered):
+        assert SMOKE.expected_exit(command) == SMOKE.DELIVERED_EXPECT[command]
 
 
 def test_eol_tool_check_mode_agrees_with_scan(repo_root):

@@ -1,0 +1,29 @@
+{
+  "episode_type": "multi_bug",
+  "expect": {
+    "event_count": 12,
+    "exit_codes": [],
+    "files_touched": [
+      "/demo/alpha/src/calc.py",
+      "/demo/beta/pkg/format.py"
+    ],
+    "kind_counts": {
+      "tool_call": 5,
+      "tool_result": 5,
+      "user_msg": 2
+    },
+    "source": "claude",
+    "tools_used": [
+      "Bash",
+      "Edit"
+    ],
+    "user_report_fragments": [
+      "demo-user, bug: divide() returns wrong value in /demo/alpha/src/calc.py",
+      "demo-user, bug: slugify() keeps uppercase letters in /demo/alpha/src/calc.py"
+    ]
+  },
+  "expect_episodes": 2,
+  "input_file": "claude/multi-bug-1.jsonl",
+  "sample": "multi-bug-1",
+  "session_id": "sess-demo-0003"
+}
