@@ -46,8 +46,9 @@
    * 缺 pytest → `DependencyMissing`（exit 3，`cli.pytest_available()` 已在门口用着）。
 2. **`regression/manifest.json`**（落点取 `[generate].manifest_path`）：每条 `episode_id` / `session_id` /
    `source` / 文件与 hunk 摘要 / 生成测试路径 / RED/GREEN 退出码与**截断**日志摘要 /
-   `status ∈ {verified, unverified, needs_manual}` / `reason` / 生成器版本；**覆盖度门槛由基准 manifest 下发**
-   （`data/bench/manifest.json` 的 `coverage.min_count_by_type`）。
+   `status ∈ {verified, unverified, needs_manual}` / `reason` / 生成器版本 / **`assumed_convention`**
+   （约定探测是否走了保守默认——这是 M4 设计里"manifest 标 assumed_convention"那句的落点）;
+   **覆盖度门槛由基准 manifest 下发**（`data/bench/manifest.json` 的 `coverage.min_count_by_type`）。
 3. **`s2r verify EPISODE_REF` + `s2r run --target DIR` 落地**（退役 exit 4 四处同步：
    `cli.STAGED_COMMANDS` → `tools/ci_smoke.py` 的 `DELIVERED_EXPECT` + 调用形态 → README 退出码表
    （**这一步之后第 4 行才能删**，`tests/test_smoke_coverage.py` 会提醒）→ `plan/04·06` 状态列），
