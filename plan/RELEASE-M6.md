@@ -198,6 +198,11 @@ sha256: f7dec59e5cb8587d348d2f345cc2d6aa01944e30195075862e6a33407c43760c  sessio
 会再产生一条 run，**不追平总数**（数字追不平，写出不变量就够可审计）。
 首推**零诊断轮**：四条腿一次全绿，未动用"诊断 + 修复 + 再推一轮"的预算。
 
+**对账定稿（停止信号）**：此后本表**不再追加绝对数字**。核对方式 = 用不变量自查——
+`gh api repos/yuluo554/session-to-regression/actions/runs --jq '.total_count'` 应等于该仓收到的
+push/tag 事件数，且逐条 `head_sha` 都能在 `git log origin/main`（及 `refs/tags`）里找到对应提交。
+本文件所在的提交本身又是一次 push，再改就会自我循环，**故就此停止**；后续 run 以 Actions 页实查为准。
+
 ### 4.4 可见性与匿名复核（用户确认后执行）
 
 * 可见性：`gh repo edit --visibility public --accept-visibility-change-consequences` → 回读

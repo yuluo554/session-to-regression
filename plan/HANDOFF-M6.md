@@ -25,9 +25,9 @@ M4 骨架生成 ✅、M5 RED/GREEN 隔离验证 + manifest + 技术报告 ✅**
 | **退出码 4 整项退役**（常量/异常类/命令表/staged handler 一并删；README 第 4 行已删） | `errors.py`、`cli.py`、`tools/ci_smoke.py`、README、`tests/test_cli_contract.py`、`tests/test_smoke_coverage.py` |
 | 验证层真对账（`expect_red_green` 逐 episode 声明三态 + RED/GREEN 退出码）+ 新探活 `fold-unverified` | `bench.py`（`red_green` 事实面）、`benchdata.py`、`data/bench/**`、`tests/test_bench.py` |
 | 技术报告（题面 §三 提交材料） | `docs/技术报告.md` |
-| 测试与门禁 | `tests/`（**348 项**，双解释器各 348）、`tools/ci_smoke.py`（20/20）、`tools/fix_eol.py`（98 文件 0 问题）、`tools/gen_bench.py --check`（10 样本位级一致） |
+| 测试与门禁 | `tests/`（**348 项**，双解释器各 348）、`tools/ci_smoke.py`（20/20）、`tools/fix_eol.py`（98 文件 0 问题）、`tools/gen_bench.py --check`（10 样本位级一致）。**↑ 本行是 M5 收棒时点的读数；M6 收官实测 353 项 ×2 解释器、103 文件 0 问题，见本文件 §七与 [RELEASE-M6.md](RELEASE-M6.md) §二** |
 
-**已验证的事实**：双解释器各 348 项通过；19 项变异全红（M1–M4 的 15 项复核 + M5 新增 4 项：隔离失效 /
+**已验证的事实**（**M5 收棒时点的读数**；M6 收官实测见 §七）：双解释器各 348 项通过；19 项变异全红（M1–M4 的 15 项复核 + M5 新增 4 项：隔离失效 /
 不落盘被折叠 / RED 判据恒真 / 缺依赖退化成照跑）；离线冒烟 20/20（`verify` / `run` 就位，产物落种子临时目录）；
 `s2r bench` = `ok`（检出 10/10、误报 0，`pending_facts` 空表）；九探活全部检出；
 非 editable 安装 + 中立 CWD 自检通过；**断网运行**（socket 桩）全链路 exit 0；

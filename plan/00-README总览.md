@@ -105,7 +105,7 @@
 | **M5 验证与交付** ✅ | 隔离副本 RED/GREEN 验证、manifest、`s2r verify`/`s2r run`、README 演示、技术报告 | 未通过项不落正式目录；退出码 0/1/2/3 各有测试；`manifest.json` schema + 枚举约束 + 门槛下发；`pip install .` 干净环境实跑 + 断网运行；技术报告定稿（[`docs/技术报告.md`](../docs/技术报告.md)）；19 项变异全红 |
 | **M6 发布** ✅ | 发布 GitHub **公开**仓库 | **DoD 三件套**：①`git tag`（annotated `v0.1.0`）；②**GitHub Release 附产物**（手工源码包 `session-to-regression-0.1.0.tar.gz` + `SHA256SUMS`，**from tag 树**打包，sha256 留档可复验）；③**发布留档**（`plan/RELEASE-M6.md`，**tag 之前写好并进 tag 树**）。另：`scripts/check_release.py` 离线 0 FAIL；提交面脱敏全 0（含 tag tagger 邮箱）；发布物本体复核（**真下载 + 中立目录**）；隐私四层审计；tag 后事实作为**追加提交**分栏记录 | ✅ 2026-10-18 |
 
-**M6 DoD 口径锁定**：采用 **A) "Release 附产物"**——源码 zip 为手工上传附件，本地必须存在同名副本与 sha256 留档，**不得**以"仓库 zipball 即产物"替代。三件套缺任一项即视为发布未达成。
+**M6 DoD 口径锁定**：采用 **A) "Release 附产物"**——源码包为手工上传附件，本地必须存在同名副本与 sha256 留档，**不得**以"仓库 zipball 即产物"替代。三件套缺任一项即视为发布未达成。**实际交付形态为 `.tar.gz`**（`git archive --format=tar` + `gzip -9n`）：命令语义与目标不变，换形态的理由是"同 tag 重复构建逐字节一致"（zip 需额外固定 `date_time`/`external_attr` 才等价），差异与理由已登记在 [RELEASE-M6.md](RELEASE-M6.md) §一。
 
 ---
 
