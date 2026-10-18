@@ -21,10 +21,11 @@
 | `05-数据计划.md` | 合成会话格式、植入真值语义、覆盖度门槛、双边门与探活、台账纪律 | ✅ M0 定稿 2026-10-17 |
 | `06-里程碑.md` | M0–M6 逐里程碑目标 / 任务 / DoD / 降级策略 / 命令 / 可演示物 | ✅ M0 定稿 2026-10-17 |
 | `07-交付对标与决策记录.md` | 材料与评分逐项对标、待拍板项、决策记录、**既定口径 K 清单** | ✅ M0 定稿 2026-10-17 |
-| `verify/README.md` | 本地等价校验逐条留档（命令 → 退出码 → 语义判定）+ 变异验证 + 与 CI 的缺口 | ✅ M0–M5 留档 |
+| `verify/README.md` | 本地等价校验逐条留档（命令 → 退出码 → 语义判定）+ 变异验证 + 与 CI 的缺口 | ✅ M0–M6 留档 |
 | [../docs/技术报告.md](../docs/技术报告.md) | 技术报告（题面 §三 提交材料）：归一化 / 切分口径 / 还原降级 / 模板与候选断言 / RED-GREEN 隔离验证 / 隐私设计 | ✅ M5 定稿 |
+| `RELEASE-M6.md` | 发布留档（M6 三件套之③）：产物与版本口径 / 发布前门禁 / 隐私四层审计 / **tag 后追加事实** / 已知限制 | ✅ tag 前落盘，tag 后追加 |
 | `HANDOFF-M1.md` | 下一棒交接：进度+证据 / 待办 / K 口径 / 环境坑 / DoD / 命令速查 | ✅ M0 收尾落盘 2026-10-17 |
-| `HANDOFF-M2.md` … `HANDOFF-M5.md` · `HANDOFF-M6.md` | 每棒交接（六节同构）；M6 为当前入口 | ✅ 逐棒落盘 2026-10-17 |
+| `HANDOFF-M2.md` … `HANDOFF-M5.md` · `HANDOFF-M6.md` | 每棒交接（六节同构）；M6 为**收官棒**，已在本文件尾部记明旅程结束 | ✅ 逐棒落盘 2026-10-17/18 |
 
 > 里程碑收尾纪律沿用系列惯例：**DoD 达成后必须在本对话内写完下一棒的 `HANDOFF-M<next>.md` 才允许结束**。
 
@@ -66,8 +67,8 @@
 | M4 pytest 骨架生成器（模板 + AST，零模型） | M3 输出 + 仓库测试约定探测 | 随包；生成物落用户仓库 `tests/regression/` | 合成基准生成内容对账（骨架数 / 逐 episode 结论与原因 / 候选断言条数 / 必需锚点）+ 同 episode 双跑逐字节一致 + 生成物 RED→GREEN 语义核对 + 约定探测失败走保守默认并标注 | ✅ M4 |
 | M5 RED 验证器 + `manifest.json` | 隔离临时副本 + pytest | 随包；pytest 为运行期可选依赖（缺失 exit 3） | before 必失败 / after 必通过双跑（退出码进真值对账）；未通过项不进正式目录；退出码四语义测试 | ✅ M5 |
 | 合成会话基准 + 植入真值 | 程序化生成 Claude / Codex 两种格式，假项目名 / 假路径白名单 | 随包零外部依赖、零 API（参照实现在包内 `s2r.benchdata`） | 生成器同步标注真值（含逐文件 before/after、生成层期望、验证层期望与磁盘基线夹具）；覆盖度门槛写 manifest；`tools/gen_bench.py --check` 位级一致；`s2r bench` 双边门（检出 10/10、误报 0）+ **九探活** | ✅ M1–M5 |
-| 隐私设计（纯本地零上传） | 无网络依赖 | 全链路本地；RED/GREEN 在临时副本内跑 | 源码 import 面门 + 入库内容扫描（真实路径 / session id 零命中）+ 磁盘读取显式开关 + 副本隔离 + 断网运行 | ✅ M5（发布期四层审计待 M6） |
-| 发布闭环（tag + Release 附产物 + 留档） | GitHub 公开仓库 | Release 附源码 zip + sha256 留档 | **仓库内耐久副本 + sha256 可复验**；tag 树内含发布留档 | ⬜ 待 M6 |
+| 隐私设计（纯本地零上传） | 无网络依赖 | 全链路本地；RED/GREEN 在临时副本内跑 | 源码 import 面门 + 入库内容扫描（真实路径 / session id 零命中）+ 磁盘读取显式开关 + 副本隔离 + 断网运行 | ✅ M5；**M6 四层审计（源码 / 产物 / socket 拦截 / 加载面）留档见 [RELEASE-M6.md](RELEASE-M6.md) §三** |
+| 发布闭环（tag + Release 附产物 + 留档） | GitHub 公开仓库 | Release 附源码包 + `SHA256SUMS` + sha256 留档 | `plan/RELEASE-M6.md`（tag 前落盘、tag 后追加事实）+ `scripts/check_release.py` 离线/`--online` 两模 | ✅ M6 |
 | 多语言生成（mjs/ts） | 扩展项 | 不入首期 | — | ⬜ 扩展 |
 | LLM 断言增强 | 扩展项 | 不入首期 | — | ⬜ 扩展 |
 | CI 集成 / 跨会话去重 / 回滚检测 | 扩展项 | 不入首期 | — | ⬜ 扩展 |
@@ -102,7 +103,7 @@
 | **M3 差分还原** ✅ | 三级降级还原（`originalFile`+非空 `structuredPatch` → `old_string`/`new_string` 定位 → Codex `FileChange.unified_diff`/patch 文本）+ 逐文件置信度 + 磁盘基线可选对齐 | 合成基准 before/after 逐字符对账；三条降级路径各有具名样本；不可定位时 `unresolved` 而非任选；磁盘对不上如实降级；同一输入同输出（单元 + CLI 两层） |
 | **M4 生成器** ✅ | 测试约定探测、AST 读签名、模板生成、docstring 证据锚点、候选断言 | 合成基准生成内容对账（含候选断言条数）；同 episode 逐字节稳定（单元 + CLI 两层）；`needs_manual` 逐条有原因；不改源码（源码树哈希不变）；15 项变异全红 |
 | **M5 验证与交付** ✅ | 隔离副本 RED/GREEN 验证、manifest、`s2r verify`/`s2r run`、README 演示、技术报告 | 未通过项不落正式目录；退出码 0/1/2/3 各有测试；`manifest.json` schema + 枚举约束 + 门槛下发；`pip install .` 干净环境实跑 + 断网运行；技术报告定稿（[`docs/技术报告.md`](../docs/技术报告.md)）；19 项变异全红 |
-| **M6 发布** | 发布 GitHub **公开**仓库 | **DoD 三件套**：①`git tag`；②**GitHub Release 附产物**（源码 zip，本地留副本 + **sha256 留档可复验**）；③**发布留档文件**（`plan/RELEASE-M6.md`，**在 tag 之前写好并进 tag 树**）。另：发布前跑 `scripts/check_release.py` 无 FAIL；提交面脱敏全 0（含 tag tagger 邮箱）；tag 后事实（附件 sha256 / 下载复核）作为**追加提交**分栏记录 |
+| **M6 发布** ✅ | 发布 GitHub **公开**仓库 | **DoD 三件套**：①`git tag`（annotated `v0.1.0`）；②**GitHub Release 附产物**（手工源码包 `session-to-regression-0.1.0.tar.gz` + `SHA256SUMS`，**from tag 树**打包，sha256 留档可复验）；③**发布留档**（`plan/RELEASE-M6.md`，**tag 之前写好并进 tag 树**）。另：`scripts/check_release.py` 离线 0 FAIL；提交面脱敏全 0（含 tag tagger 邮箱）；发布物本体复核（**真下载 + 中立目录**）；隐私四层审计；tag 后事实作为**追加提交**分栏记录 | ✅ 2026-10-18 |
 
 **M6 DoD 口径锁定**：采用 **A) "Release 附产物"**——源码 zip 为手工上传附件，本地必须存在同名副本与 sha256 留档，**不得**以"仓库 zipball 即产物"替代。三件套缺任一项即视为发布未达成。
 
@@ -123,28 +124,23 @@
 
 ---
 
-## 七、下一步（交接语）
+## 七、下一步（交接语 · 旅程结束）
 
 **M0（骨架）· M1（数据先行 + 读取器 + 合成基准）· M2（episode 切分）· M3（差分还原）·
-M4（pytest 骨架生成）· M5（RED/GREEN 隔离验证 + manifest + 技术报告）已于 2026-10-17 完成**：
-计划文档 00–07 定稿、骨架落地、字段核对与三处勘误入台账、`scan`/`bench`/`reconstruct`/`generate`/
-`verify`/`run` 六条命令跑通（退出码 4 整项退役）、门禁与本地等价校验逐条留档
-（见 [verify/README.md](verify/README.md)）、技术报告定稿（[`docs/技术报告.md`](../docs/技术报告.md)）。
-下一棒入口 = [plan/HANDOFF-M6.md](HANDOFF-M6.md)（六节：进度+证据 / 待办 / K 口径 / 环境坑 / DoD / 命令速查）。
+M4（pytest 骨架生成）· M5（RED/GREEN 隔离验证 + manifest + 技术报告）· M6（发布）
+已于 2026-10-18 全部完成**：计划文档 00–07 定稿、骨架落地、字段核对与三处勘误入台账、
+`scan`/`bench`/`reconstruct`/`generate`/`verify`/`run` 六条命令跑通（退出码 4 整项退役）、
+门禁与本地等价校验逐条留档（见 [verify/README.md](verify/README.md)）、技术报告定稿
+（[`docs/技术报告.md`](../docs/技术报告.md)）、**公开仓库 + annotated tag `v0.1.0` + Release 附源码包**
+（发布留档 [RELEASE-M6.md](RELEASE-M6.md)；发布门 `scripts/check_release.py`）。
 
-新对话第一条命令（绝对路径只出现在用户侧启动命令里）：
+**本系列到此收官**——M6 是最后一棒：`plan/HANDOFF-M6.md` 尾部已记明"旅程结束"，
+不再有 `HANDOFF-M7`。[RELEASE-M6.md](RELEASE-M6.md) 兼作**发布留档与完结档**（发布类收官的
+收尾证据天然集中在发布留档里；`plan/00` 本表的里程碑行全 ✅ + §三 承诺-证据台账逐行结案
+即完结宣告）。
 
-    /goal 读取 "<项目绝对路径>/plan/HANDOFF-M6.md" 继续完成任务
-
-M6 要做的事（详见 HANDOFF-M6 与 [06-里程碑.md](06-里程碑.md)）：**发布 DoD 三件套**——
-①`git tag`（annotated）；②**GitHub Release 附源码 zip 产物**（本地留同名副本 + sha256 留档可复验，
-**不得**以"仓库 zipball 即产物"替代）；③**发布留档 `plan/RELEASE-M6.md`**（**在 tag 之前写好并进 tag 树**）。
-另加：发布前跑 `scripts/check_release.py`（M6 交付物，当前未创建）无 FAIL；提交面脱敏全 0
-（含 tag tagger 邮箱）；发布物本体复核（**真下载 + 中立目录**解压跑 `s2r selftest`）；
-隐私四层审计（源码 import / 发布产物扫描 / socket 拦截动态 / 加载面静态）；topic 与 description 与 README 定位一致。
-
-**提醒（写进每一棒交接语）**：①发布类里程碑须含 **tag · Release 附产物 · 发布留档** 三件套；
-②收尾必须跑 `scripts/check_release.py`（M6 交付物，当前未创建）；③本题**不依赖 git 还原 diff**，
-任何实现若引入 git 必需依赖即为偏离题面；④对外动作（建仓 / 推送 / 发布）先向用户确认再执行；
-⑤未接远端期间一切 CI 结论写"本地等价校验，未接远端，CI 待首推验证"；⑥发布期的"下载即用"复核要在
-**中立目录**里做（别在作者工作树里自证）。
+**收官时点仍需向后的自省（写给任何将来接手的人）**：① 对外动作（建仓 / 推送 / tag / Release /
+可见性切换）**必须先经用户确认**再执行；② 未接远端期间一切 CI 结论写"本地等价校验，未接远端，
+CI 待首推验证"，首推后据实**追加**真实 run 结论（不改写历史措辞）；③ 发布期的"下载即用"复核
+一律在**中立目录**里做（别在作者工作树里自证）；④ 本题**不依赖 git 还原 diff**，任何实现若引入
+git 必需依赖即为偏离题面。

@@ -9,13 +9,16 @@
 > 痛点来自公开抱怨：coding agent 常常「让测试变绿」而不是「让代码变对」，甚至把上周的修复改回去
 > （HN item 49981230，2026-10-06）。修复是一次性的，回归是永久的——本工具把每一次修复钉成回归测试。
 
-**状态（2026-10-17）**：**M1（双 harness 读取器）+ M2（episode 切分）+ M3（差分还原）+ M4（pytest 骨架生成）
-+ M5（RED/GREEN 隔离验证 + manifest）已交付**——读本机日志、按 `payload.type` 归一事件流、
-切出"报 bug → 失败 → 改文件"的 episode 并确定性打分过滤、把每次修复的 before/after 从日志里还原出来
-（三级降级 + 逐文件置信度）、生成一份带证据锚点与候选断言的 pytest 骨架（模板 + AST，**零模型**），
-最后在**目标仓库的临时副本**里跑 RED/GREEN，只有"修复前失败、修复后通过"的测试才写进测试目录，
-并落一份 `regression/manifest.json` 记录每一条结论与原因。合成语料基准逐字段对账（episode 层 +
-**还原层**逐字符比对 + **生成层** + **验证层**的红绿退出码）。**M6（发布）未开始。**
+[![ci](https://github.com/yuluo554/session-to-regression/actions/workflows/ci.yml/badge.svg)](https://github.com/yuluo554/session-to-regression/actions/workflows/ci.yml)
+
+**状态（2026-10-18）**：**v0.1.0 已发布** —— [Release](https://github.com/yuluo554/session-to-regression/releases/tag/v0.1.0)（源码包 + 校验值；
+发布留档见 [`plan/RELEASE-M6.md`](plan/RELEASE-M6.md)）。M1（双 harness 读取器）+ M2（episode 切分）
++ M3（差分还原）+ M4（pytest 骨架生成）+ M5（RED/GREEN 隔离验证 + manifest）+ M6（发布）全部交付：
+读本机日志、按 `payload.type` 归一事件流、切出"报 bug → 失败 → 改文件"的 episode 并确定性打分过滤、
+把每次修复的 before/after 从日志里还原出来（三级降级 + 逐文件置信度）、生成一份带证据锚点与候选断言的
+pytest 骨架（模板 + AST，**零模型**），最后在**目标仓库的临时副本**里跑 RED/GREEN，只有"修复前失败、
+修复后通过"的测试才写进测试目录，并落一份 `regression/manifest.json` 记录每一条结论与原因。合成语料
+基准逐字段对账（episode 层 + **还原层**逐字符比对 + **生成层** + **验证层**的红绿退出码）。
 
 ---
 
@@ -28,6 +31,22 @@ pip install -e ".[dev]"     # dev 是唯一 extras（pytest），CI 与本文档
 ```
 
 要求 Python ≥ 3.8，运行期**零第三方依赖**（TOML 口径文件由内置的严格子集读取器解析）。
+
+## 下载即用（Release 附件）
+
+Release 附件是**手工打出的源码包** `session-to-regression-0.1.0.tar.gz`（含合成语料 `data/bench/**`，
+解包后无需额外下载即可跑全部命令与基准），另有伴随清单 `SHA256SUMS`：
+
+```bash
+# 校验（两条命令都在**下载目录**里执行；哈希值见 plan/RELEASE-M6.md §四「tag 后追加事实」）
+sha256sum -c SHA256SUMS
+tar -xzf session-to-regression-0.1.0.tar.gz && cd session-to-regression-0.1.0
+pip install -e ".[dev]"
+s2r selftest && s2r bench          # 自检 + 合成基准（检出 10/10、误报 0）
+```
+
+附件名以**这里写的名字**为准（由打包命令决定，不是从包名推导出来的）；附件与 tag 树**逐字节同源**
+（复核方式见 `plan/RELEASE-M6.md`）。
 
 ## 三分钟演示（当前可用）
 
@@ -159,6 +178,10 @@ assert 段是占位 + **候选断言**。三条纪律：
 * 真实日志、真实路径清单、真实 session id **一律不入仓**；本公开仓库只含**合成基准**（假项目名/假路径/假 id）；
 * 生成物只写目标仓库的测试目录与临时副本，**不修改用户源码、不碰 git 索引**。
 
+"零上传"不是一句话，而是**四层审计**逐层可核验的结论（① 源码 import 面 / ② 发布产物扫描 /
+③ socket 拦截下的全链路动态运行 / ④ 实际加载面静态扫描，逐层读数见
+[`plan/RELEASE-M6.md`](plan/RELEASE-M6.md) §三）。
+
 ## 合成基准（`data/bench`）
 
 基准与回归**一律使用合成会话日志**（假项目名/假路径/假 session id；白名单见 `data/README.md` §三），
@@ -213,6 +236,7 @@ pytest -q                      # 单元与契约测试（双解释器：3.8 与 
 python tools/ci_smoke.py       # 离线 CI 冒烟：逐条跑已交付命令 + 断言退出码语义
 python tools/gen_bench.py --check   # 基准语料再生成位级一致
 python tools/fix_eol.py --check     # 行尾/结尾换行卫生（CI 同款门）
+python scripts/check_release.py     # 发布前一把过（发布态加 --online：远端 tag/Release/附件逐条核）
 ```
 
 技术报告（归一化 / 切分口径 / 还原降级 / 模板生成与候选断言 / RED-GREEN 隔离验证 / 隐私设计）

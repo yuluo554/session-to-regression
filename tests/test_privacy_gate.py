@@ -7,13 +7,19 @@
 from __future__ import annotations
 
 import ast
-import re
 from pathlib import Path
 from typing import List, Set
 
 from _tools import load_tool
 
 import pytest
+
+#: 判据与"扫描面遍历规则"都只有一份实现：`tools/path_forms.py`。
+#: 发布前一把过的门（`scripts/check_release.py`）用的是同一个模块——它要能在没有 pytest 的
+#: 干净 clone 上跑，所以判据不能只活在测试里。
+_path_forms = load_tool("path_forms")
+LOCAL_PATH_PATTERNS = _path_forms.LOCAL_PATH_PATTERNS
+_iter_files = _path_forms.iter_scan_files
 
 #: 任何能发起网络调用的顶层模块：出现即红（纯本地定位的一部分）
 FORBIDDEN_IMPORTS = frozenset(
@@ -36,18 +42,7 @@ FORBIDDEN_IMPORTS = frozenset(
     }
 )
 
-#: 泄露本机形态的字符串形态（脱敏：入库文本不得含本机绝对路径）。
-#: 判据用正则而不是字面量：① 只匹配"真实路径形态"（**大写盘符**+反斜杠、家目录+用户名段），
-#: 不误伤文档里讨论路径**形式**的叙述；② 正则源码本身不含被匹配的字面串，扫到自己也不会自命中。
-#:
-#: 为什么盘符限定大写：源码里的 `...:\n` 这类**转义序列**（如 `"Output:\nSuccess"`）会命中
-#: `<任意字母>:\` 这种宽判据——本项目首版就这么误报了三处（`t:\`/`e:\` 来自 `\n` 与 `\s`）。
-#: 真实日志里的 Windows 路径按惯例是大写盘符，所以收紧到大写既保住检出（见下面的阳性对照），
-#: 又消掉转义噪声。
-LOCAL_PATH_PATTERNS = (
-    re.compile(r"[A-Z]:\\"),
-    re.compile(r"/(?:Users|home)/[A-Za-z0-9._-]+/"),
-)
+#: 泄露本机形态的字符串形态见 `tools/path_forms.LOCAL_PATH_PATTERNS`（单点实现，此处不复制）。
 
 
 def test_local_path_pattern_has_a_positive_control():
@@ -64,16 +59,10 @@ def test_local_path_pattern_has_a_positive_control():
 SCAN_SUFFIXES = (".py", ".toml", ".md", ".yml", ".yaml", ".cfg", ".txt")
 
 
-def _iter_files(root: Path):
-    """入库文本文件的遍历规则**与 CI 的 tools/fix_eol.py 同源**（单点实现，别各写一份）。
-
-    "哪些文件算仓库文本"如果两处各写一份，必然漂移：一边排除了构建元数据、另一边没排除，
-    就会出现"EOL 门绿而脱敏门红"这类一半真一半假的结果。
-    """
-    fix_eol = load_tool("fix_eol")
-    for path in fix_eol.iter_text_files(root):
-        if path.suffix.lower() in SCAN_SUFFIXES or path.name in (".gitignore", ".gitattributes", "LICENSE"):
-            yield path
+def test_local_path_scan_covers_the_repository_text_tree(repo_root):
+    """扫描面自证：门要能说出"这一轮扫了几个文件"——否则"没扫到"与"扫干净了"长得一样。"""
+    scanned = sum(1 for _ in _iter_files(repo_root))
+    assert scanned >= 15, "扫描面过小（{}）".format(scanned)
 
 
 def _imported_roots(tree: ast.AST) -> Set[str]:
@@ -104,16 +93,11 @@ def test_no_network_capable_imports_in_source(repo_root):
 
 
 def test_no_local_absolute_paths_in_repository_text(repo_root):
-    """入库文本（含本次新增文档）不得出现本机盘符/家目录形态路径——发布期脱敏的前置门。"""
-    offenders: List[str] = []
-    scanned = 0
-    for path in _iter_files(repo_root):
-        scanned += 1
-        text = path.read_text(encoding="utf-8", errors="replace")
-        for pattern in LOCAL_PATH_PATTERNS:
-            match = pattern.search(text)
-            if match:
-                offenders.append("{}: {}".format(path.relative_to(repo_root), match.group(0)))
+    """入库文本（含本次新增文档）不得出现本机盘符/家目录形态路径——发布期脱敏的前置门。
+
+    判定走 `tools/path_forms.find_local_path_leaks`（与 `scripts/check_release.py` 同一份实现）。
+    """
+    offenders, scanned = _path_forms.find_local_path_leaks(repo_root)
     assert scanned >= 15, "扫描面过小（{}）".format(scanned)
     assert not offenders, "发现本机路径形态: {}".format(offenders)
 
