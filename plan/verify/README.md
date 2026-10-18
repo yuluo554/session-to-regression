@@ -531,3 +531,23 @@ N1–N8（模板空转 / 候选断言不落骨架 / 探活假门 / 生成对账�
   ② `scripts/check_release.py --online` 依赖 `gh` 与网络，本机在**发布时**才第一次真跑；
   ③ CI 检出形态会把**标注 tag 对象**改写掉 → `--online` 的 tag 形态检查在 CI 里看到的可能是轻量 tag，
   故 `tagger 邮箱` 一栏在留档里标注为"**本地核**"（不把 CI 的空值当证据）。
+
+### M6.6 发布物本体复核（真下载 + 中立目录；详细表见 [RELEASE-M6.md](../RELEASE-M6.md) §4.2）
+
+| # | 命令（都在**中立目录**、不碰作者工作树） | 退出码 | 语义判定 |
+|---|---|---|---|
+| 1 | `gh release download v0.1.0`（仓库目录内跑） | 0 | ✅ 两件附件落地（311564 B / 101 B）——"命令没报错"与"文件真下来了"分开看（`ls -l` 为证） |
+| 2 | `sha256sum -c SHA256SUMS` | 0 | ✅ `session-to-regression-0.1.0.tar.gz: OK` |
+| 3 | `cmp` 下载件 vs 本地留档件 | 0 | ✅ 逐字节一致 |
+| 4 | 安装解包树 → 中立目录 `python -m s2r selftest` | 0 | ✅ `status: ok`；`config path` 指向**安装面内**的随包副本 |
+| 5 | `s2r bench`（解包树根，editable 等价形态） | 0 | ✅ `ok`（10/10、误报 0）——`data/bench/**` 真随包 |
+| 6 | `s2r run --target <树外目录> …` | 0 | ✅ 8 条结论（verified 2 / unverified 1 / needs_manual 5），写出 2 个测试 + manifest |
+| 7 | 附件解包树 vs `git archive v0.1.0` 解包树 `diff -r` | 0 | ✅ **零差异**（103 文件）——"附件 = tag 树"最直白的正面证明 |
+| 8 | 非 editable 安装（`pip install --target`）下 `s2r bench` | 2 | ⚠️ **符合明示语义**：按"包外三级"找语料 → `input_unavailable`；加 `--data-dir data/bench` 后 0。已补进 README 已知限制（**文档缺口，非发布物缺陷**；不重打 tag） |
+| 9 | `py -3.8 -X utf8 scripts/check_release.py --online` | 0 | ✅ 发布态全量：远端可见性 / tagged 对象形态与提交 / 该提交 CI 逐 job 绿 / Release 非 draft / 附件集合与登记一致 / 逐附件下载回来重算 sha256 |
+
+**匿名（无凭据）复核**：本机 `github.com:443` 连续 3 次 25s 超时（`curl http=000`），而 `api.github.com`
+与 `codeload.github.com` 均 200 → 裸 https `clone` 与 Release 页 HTTP 码两项标 **⬜ 未完成**；
+改由同样"无凭据"的三条通道取证：匿名 API 读 Release 元信息（`isDraft=false`、附件名/字节数/digest
+与留档逐项一致）、匿名 API 资产端点下载附件（sha256 逐位一致）、匿名 `codeload` tag 树 vs 附件解包树
+`diff -r` 零差异。**不把"没测到"写成"验过了"**。

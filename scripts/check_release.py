@@ -494,16 +494,35 @@ def check_remote(repo_root: Path, facts: Dict[str, str], tag: str) -> Optional[s
     obj = data.get("object", {})
     sha = obj.get("sha")
     if commit and sha and commit != sha:
-        # 远端 tag 的 peeled 提交与 ref 指向：直接比 git 那侧的值会拿到 tag 对象自身的 sha，
-        # 所以这里只在"两边都拿到"时做一致性提示，不作判定。
-        add("tag", STATUS_PASS, "{} 指向 {}（git ls-remote 报 {}：annotated tag 的对象 sha）".format(tag, sha, commit))
+        # `git ls-remote --tags` 报的是**tag 对象自身**的 sha（annotated tag），与 ref 指向一致。
+        add("tag", STATUS_PASS, "{} 指向 tag 对象 {}（git ls-remote 报同一值）".format(tag, sha))
     else:
         add("tag", STATUS_PASS, "{} 指向 {}（type={}）".format(tag, sha, obj.get("type")))
     if obj.get("type") != "tag":
         add("tag_type", STATUS_FAIL, "远端 {} 不是 annotated tag（object.type={}）".format(tag, obj.get("type")))
-    else:
-        add("tag_type", STATUS_PASS, "{} 是 annotated tag（tagger 邮箱见留档 §一）".format(tag))
-    return commit or sha
+        return sha
+    add("tag_type", STATUS_PASS, "{} 是 annotated tag".format(tag))
+    # **必须剥一层**：annotated tag 的 object.sha 是 tag 对象本身，不是提交——
+    # 拿它去查 `actions/runs?head_sha=` 会永远查不到 run（"没扫到"伪装成"没跑过"）。
+    peeled, problem = _gh_json(["api", "repos/{}/git/tags/{}".format(slug, sha)])
+    if peeled is None:
+        add("tag_commit", STATUS_WARN, "剥 tag 对象失败: {}".format(problem))
+        return sha
+    target = peeled.get("object", {})
+    tagger = peeled.get("tagger", {})
+    add(
+        "tag_commit",
+        STATUS_PASS,
+        "{} → 提交 {}（tagger 邮箱形态 {}）".format(tag, str(target.get("sha"))[:12], _email_shape(tagger.get("email"))),
+    )
+    return target.get("sha") or sha
+
+
+def _email_shape(email: Optional[str]) -> str:
+    """只报**形态**（是否为 GitHub noreply），不复述地址——留档跑扫描器时不该自命中。"""
+    if not email:
+        return "缺失"
+    return "noreply 形态" if email.endswith("users.noreply.github.com") else "**非 noreply**"
 
 
 def check_ci(repo_root: Path, facts: Dict[str, str], commit: Optional[str]) -> None:

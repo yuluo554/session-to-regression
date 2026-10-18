@@ -126,21 +126,98 @@ artifact: session-to-regression-0.1.0.tar.gz
 
 ## 四、tag 后追加事实
 
-> 本节在 tag 树里是**占位**（口径要求"不许预填还没发生的事实"）。以下四类事实只能在 tag 之后成立：
-> **tag 对象 sha / tag push 那条 CI run / 附件 sha256 / 真下载复核结论**。tag 之后的追加提交把本节填满，
-> 并同步 `gh release edit --notes-file` 保持 Release 正文与文件一致。
-> 另需注明一处**设计差异**：README 顶部的发布状态行与 Release 链接**在 tag 树里就已写入**——链接由
-> tag 名决定（`releases/tag/v0.1.0`），不随树内容变化，故它不是"未发生的事实"；而**附件 sha256 会随树
-> 内容变**（不动点），只能登记在这里。tag 树里的 DoD 复选框同理：只能在本节补齐时才能打勾。
+> 本节在 tag 树里是**占位**（口径要求"不许预填还没发生的事实"）。tag 之后的追加提交把本节填满；
+> **不改写本节以上内容**。tag 树里的 DoD 复选框因此必然是空框——这条差异记在这里，别读成"tag 树漏打勾"。
+>
+> **两处设计差异，先写清免得读者以为漏了**：
+> ① README 顶部的发布状态行与 Release 链接**在 tag 树里就已写入**——链接由 tag 名决定
+> （`releases/tag/v0.1.0`），不随树内容变化；而**附件 sha256 会随树内容变**（不动点），只能登记在本节。
+> ② **本版不重打 tag** 的理由：本体复核发现 README 少一条"非 editable 安装下 `bench` 需 `--data-dir`"
+> 的说明（**文档缺口，不是发布物缺陷**：代码、数据、命令语义都没问题，README 快速开始那条 editable
+> 路径实测全通）。按纪律走"追加提交 + 本节登记"——窗口虽未关，但重打 tag 会让**已登记的附件哈希立刻
+> 过期**，收益为负。
 
-* 附件（`session-to-regression-0.1.0.tar.gz`）：sha256 ⬜ 待登记、字节数 ⬜ 待登记（两次独立构建一致性 ⬜ 待登记）
-* 伴随清单 `SHA256SUMS`：内容与载荷集合一致性 ⬜ 待登记
-* annotated tag `v0.1.0`：对象 sha ⬜ 待登记、tagger 邮箱 ⬜ 待登记（本地核）
-* 真下载复核：`gh release download` → `sha256sum -c` → **中立目录**解压 → `s2r selftest` /
-  `s2r config path` / 一条 `run` 演示；附件解包树 vs `git archive <tag>` 解包树 `diff -r` ⬜ 待登记
-* CI 对账（**每个 push / tag 事件恰一 run、head_sha 全对上**；tag run 也必须绿）⬜ 待登记
-* 可见性：先 `--private` 跑 CI，绿后切 `public`；匿名无凭据复核（裸 https clone + 裸 curl 下载件
-  sha256 比对 + Release 页 200）⬜ 待登记
+### 4.1 附件与 tag
+
+* 产物：`session-to-regression-0.1.0.tar.gz`，**311564 字节**（含 `data/bench/**`）
+* sha256（由 `sha256sum` 输出直接重定向生成，人只写注释行）：
+
+```
+sha256: f7dec59e5cb8587d348d2f345cc2d6aa01944e30195075862e6a33407c43760c  session-to-regression-0.1.0.tar.gz
+```
+
+* 伴随清单 `SHA256SUMS`（101 字节，标准 `sha256sum` 文法 → `sha256sum -c` 直接可吃；
+  其 sha256 `aa987347e4fd40fb6b127d635dee90b33980aac7c3c00699b75232ee96902650`）
+* 打包口径：`git archive --format=tar --prefix=session-to-regression-0.1.0/ v0.1.0 | gzip -9n`
+  ——**同 tag 两次独立构建 sha256 逐位相同、`cmp` 逐字节一致**；构建件留底在**仓库树外**
+* annotated tag `v0.1.0`：对象 sha `b1cae60aa2d25fbd969ab84ff84d1205e4a34581`（`git cat-file -t` = `tag`），
+  指向提交 `93e2aae26bbc1ceadc707d1f0c19893d83745c80`；tagger 邮箱为 **noreply 形态**（本地核；
+  地址形态见 §一，此处不复述字面值——留档跑自己的扫描器时不该自命中）
+
+### 4.2 发布物本体验证（真下载 + 中立目录）
+
+| # | 步骤 | 结果 |
+|---|---|---|
+| 1 | `gh release download v0.1.0`（仓库目录内） | ✅ 两件附件（311564 B / 101 B） |
+| 2 | `sha256sum -c SHA256SUMS` | ✅ `session-to-regression-0.1.0.tar.gz: OK` |
+| 3 | 与本地留档件 `cmp` | ✅ 逐字节一致 |
+| 4 | 中立目录解压 → 安装 → `s2r selftest` | ✅ `status: ok`（口径文件解析到**安装面内**的随包副本） |
+| 5 | **中立 CWD** 下 `s2r config path` | ✅ 指向 `<安装目标>/s2r/resources/scoring.toml` |
+| 6 | 解包树根 `s2r bench`（editable 等价形态） | ✅ `ok`（10/10、误报 0）——`data/bench/**` 随包、`-text` 冻结生效 |
+| 7 | 解包树根 `s2r run --target <树外目录>` | ✅ 9 会话 → 8 条结论（verified 2 / unverified 1 / needs_manual 5），写出 2 个测试 + manifest |
+| 8 | 附件解包树 vs `git archive v0.1.0` 解包树 `diff -r` | ✅ **零差异**（103 个文件） |
+| 9 | 隐私四层审计的层②/③/④按**产物解包树**重跑 | ✅ 禁用导入 0、调用面 0、`src/` 内 URL 0；全链路 exit 0、阻断 0 次 |
+| 10 | 非 editable 安装（`pip install --target`）下的 `bench` | ⚠️ 报 `input_unavailable`（按"包外三级"找语料）→ 显式 `--data-dir data/bench` 后 `ok`；**已补进 README 已知限制**（本追加提交），**不重打 tag**（理由见本节开头） |
+
+> 第 8 步的一个操作坑（值得记）：**解压树会被自己的验证动作污染**——第 4/6 步在同一棵解压树里跑过
+> `pip install` 之后，树里多出 `build/` 与 `src/*.egg-info/`，于是 `diff -r` 会报"多出两项"。
+> 正解 = **另解一份干净的**再比（本项目即如此），别把"验证方法的污染"读成"附件与 tag 树不同源"。
+
+### 4.3 CI 对账（快照 + 不变量）
+
+| 事件 | run id | head_sha | 结论 |
+|---|---|---|---|
+| push `main` | 39083499234 | 93e2aae | ✅ success（4 腿：ubuntu-22.04/3.8、ubuntu-latest/3.12、windows-latest/3.8、windows-latest/3.12） |
+| push `v0.1.0`（tag） | 39083675618 | 93e2aae | ✅ success（同 4 腿） |
+
+**不变量**：一条 push / tag 事件恰好一条 run、`head_sha` 与本地提交逐条对上；**tag 那条也必须绿**
+才算发布提交全绿。本表是**截至 `93e2aae` 的快照**——本文件所在的追加提交又是一次 push，按不变量
+会再产生一条 run，**不追平总数**（数字追不平，写出不变量就够可审计）。
+首推**零诊断轮**：四条腿一次全绿，未动用"诊断 + 修复 + 再推一轮"的预算。
+
+### 4.4 可见性与匿名复核（用户确认后执行）
+
+* 可见性：`gh repo edit --visibility public --accept-visibility-change-consequences` → 回读
+  `visibility=PUBLIC`、`isPrivate=false`（gh 2.93+ 必须带该 flag，否则报 usage error）；
+  topics = `cli / local-first / pytest / python / regression-testing / session-log`（加完回读确认）
+* **匿名（完全不带凭据）复核**——判据是"换成陌生人来做，结果一样吗"：
+  * ① 匿名 `git clone https://github.com/…`：⬜ **未完成** —— 本机 `github.com:443` 连续 3 次
+    25s 超时（`curl` 取该 URL `http=000`），同一时刻 `api.github.com` 200、`codeload.github.com` 200
+  * ② 匿名 `curl https://api.github.com/repos/…/releases/tags/v0.1.0`（无 token / 无 header）：
+    ✅ `isDraft=false`、`tag_name=v0.1.0`、附件名 / 字节数 / digest 与留档**逐项一致**
+  * ③ 匿名 API 资产端点（`Accept: application/octet-stream`）下载附件：✅ 311564 B，
+    sha256 与定稿值**逐位一致**
+  * ④ 匿名 `codeload.github.com` 取 tag 树 tarball → 解包 vs 发布附件解包树 `diff -r`：✅ **零差异**
+  * Release 页 HTML（`github.com/…/releases/tag/v0.1.0`）HTTP 码：⬜ **未测**（同 ①，主站 443 本机不可达）
+* **措辞纪律**：支撑"公开可访问"的是 ②③④（三条都是无凭据通道）；① 与页面 HTTP 码标 ⬜ 并写清
+  原因——**不把"没测到"写成"验过了"**，也不因为两条通道不通就把整段结论改成"不可访问"。
+
+### 4.5 tag 之后代码面的差异（发布后每落一笔提交都要重证）
+
+    git diff --name-only v0.1.0..HEAD
+
+本追加提交的面 = `README.md` + `plan/**`（文档面）+ **`scripts/check_release.py` 一处发布期工具修复**。
+逐项说清，别让读者自己去猜"代码动没动"：
+
+* **用户面代码零改动**：`git diff --name-only v0.1.0..HEAD -- src/ tests/ tools/ pyproject.toml config/`
+  的输出为**空**——`s2r` 的功能、测试、口径文件与 tag 树完全一致；
+* **唯一改动的代码是发布期工具**：`scripts/check_release.py` 的 `--online` 原先直接拿
+  `git/ref/tags/<tag>` 的 `object.sha` 去查 CI——而 **annotated tag 的该字段是 tag 对象本身、不是提交**
+  → 必然查不到 run，把"**没扫到**"伪装成"**没跑过**"（本 skill 反复强调的那类假绿）。修复 = 先经
+  `git/tags/<sha>` 剥一层拿到真实提交再查。
+  ⚠️ **发布物（tag 树）里那份脚本没有这个修复**：所以**不要**用附件里的 `--online` 判发布态，
+  从 `main` 取该脚本（或直接读本节）。这条差异**不重打 tag**——它是发布期工具的缺陷、不在用户面，
+  重打会让已登记附件哈希立刻过期，收益为负。
 
 ---
 

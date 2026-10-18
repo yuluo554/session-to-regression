@@ -146,15 +146,57 @@ s2r bench && python tools/gen_bench.py --check
 # 门禁
 PATH="$PWD/.venv-check/Scripts:$PATH" .venv-check/Scripts/python.exe tools/ci_smoke.py
 python tools/fix_eol.py --check
+python scripts/check_release.py                    # 发布前一把过；发布态加 --online
 
 # 变异验证跑批（仓库树外）
-py -3.8 -X utf8 "$TEMP/s2r-mutations/mutate_m5.py"
+py -3.8 -X utf8 "$TEMP/s2r-mutations/mutate_m5.py"      # M1–M5 的 19 项
+py -3.8 -X utf8 "$TEMP/s2r-mutations/mutate_m6.py" "$PWD"   # M6 发布门 6 组
 
 # 断网探针（仓库树外；socket 桩）
 .venv-check/Scripts/python.exe "$TEMP/s2r-mutations/offline_run.py" <目标仓库> "$PWD/data/bench"
+# 隐私四层审计（仓库树外；可选第二参数 = 产物解包树）
+.venv-check/Scripts/python.exe "$TEMP/s2r-mutations/privacy_audit_m6.py" "$PWD" [<解包树>]
 
 # 发布（**先向用户确认**）
-gh repo create yuluo554/session-to-regression --public
+gh repo create yuluo554/session-to-regression --private --source . --remote origin
+git push -u origin main
 git tag -a v0.1.0 -m "session-to-regression v0.1.0"
-gh release create v0.1.0 <zip> --notes-file plan/RELEASE-M6.md
+git archive --format=tar --prefix=session-to-regression-0.1.0/ v0.1.0 | gzip -9n > session-to-regression-0.1.0.tar.gz
+gh release create v0.1.0 <tarball> SHA256SUMS --notes-file plan/RELEASE-M6.md --verify-tag
 ```
+
+---
+
+## 七、旅程结束（M6 收官声明 · 2026-10-18）
+
+**M6（发布）已完成，本系列到此收官——不存在 `HANDOFF-M7`。**
+
+DoD 逐项落地与证据（**全部已发生**，不是计划）：
+
+| DoD 项 | 落地事实与证据 |
+|---|---|
+| `scripts/check_release.py` 无 FAIL | 离线 **0 FAIL / 6 PASS / 4 SKIP**（网络项离线报 SKIP）；离线检查项**常驻测试**（`tests/test_check_release.py` 4 项）；发布门变异 **6/6 红、6/6 还原回绿** |
+| `plan/RELEASE-M6.md` 在 tag 之前写好并进 tag 树 | 提交 `e8b92a7`（tag 前）落盘；§二–§三 在 tag 树里已是实测值 |
+| `git tag -a`（annotated，tagger 邮箱 noreply） | `v0.1.0` = tag 对象 `b1cae60aa2d25fbd969ab84ff84d1205e4a34581`，指向 `93e2aae`；本地核 tagger 邮箱为 noreply 形态 |
+| Release 附产物（手工源码包，**非 zipball**） | `session-to-regression-0.1.0.tar.gz`（311564 B，sha256 `f7dec59e…c43760c`）+ `SHA256SUMS`；两次独立构建逐字节一致；`isDraft=false` |
+| 发布物本体复核（真下载 + 中立目录） | 下载件 `sha256sum -c` OK、与本留档件 `cmp` 一致、解包树 vs `git archive v0.1.0` `diff -r` **零差异**、`selftest`/`bench`/`run` 全通（[RELEASE-M6.md](RELEASE-M6.md) §4.2） |
+| 隐私四层审计逐层留档 | ① 19 文件 0 命中 / ② 产物树调用面 0、`src/` URL 0 / ③ socket 拦截全链路 exit 0、阻断 0 / ④ 加载面本项目 0 命中（[RELEASE-M6.md](RELEASE-M6.md) §三） |
+| 提交面脱敏 | 全部提交 `%ae`/`%ce` 均为 noreply；入库文本零本机路径形态（`tools/path_forms.py` 单点判据） |
+| README 状态行转正 + 链接；topic / description 与定位一致 | README 头部"v0.1.0 已发布"+ Release 链接 + 下载即用节；`gh repo view` 回读 `visibility=PUBLIC`、topics 六项 |
+| 文档回写 00 §一/§三/§五/§七、06 M6 段与状态表、07 §一第 6 行与 D6/决策表、verify/README §M6 | 各文件对应章节（含 K32 与 M6 决策行） |
+| tag 后事实作为**追加提交**分栏记录 | [RELEASE-M6.md](RELEASE-M6.md) §四（附件 sha256 / tag 对象 / 真下载复核 / CI 对账 / 可见性与匿名复核） |
+| 本对话内写完下一棒 HANDOFF 或记明"旅程结束" | **本文件尾部即收官声明**（M6 是最后一棒） |
+
+**CI 事实（本轮首次接远端）**：push `main` run `39083499234` ✅、push `v0.1.0` run `39083675618` ✅，
+各 4 腿（`{ubuntu-22.04, ubuntu-latest, windows-latest, windows-latest} × {3.8, 3.12}`）
+**首推即全绿、零诊断轮**。按纪律：M6 之前的所有"本地等价校验，未接远端，CI 待首推验证"措辞
+**保留原样不改写**，真实 run 结论只在这里与 [RELEASE-M6.md](RELEASE-M6.md) §4.3 追加。
+
+**诚实的未完成项（⬜ + 原因，不预填）**：① 匿名裸 https `git clone` 与 Release 页 HTTP 码——
+本机 `github.com:443` 连续超时（`api.github.com` / `codeload.github.com` 均 200），改由同样无凭据的
+另三条通道取证；② `--online` 的 Linux 腿行为只有 CI 可覆盖（本机无该环境）。
+
+**给将来接手者的最短入场**：读 [`plan/RELEASE-M6.md`](RELEASE-M6.md)（发布留档兼完结档）→
+`plan/06-里程碑.md` 状态表 → `plan/verify/README.md` §M6 → 跑 `python scripts/check_release.py --online`。
+本项目**不依赖 git 还原 diff**，任何实现若引入 git 必需依赖即为偏离题面；对外动作（改可见性 /
+删仓 / 历史重写）一律先经用户确认。
