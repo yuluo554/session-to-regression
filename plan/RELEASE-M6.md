@@ -47,6 +47,16 @@ artifact: session-to-regression-0.1.0.tar.gz
 **附件含 `data/bench/**`**（合成语料 + 真值 + 磁盘基线夹具，用户拍板）：它是交付物的一部分（`bench --check`
 能复算），不含的话"下载解压即用"的基准复核失真。体积与 sha256 见 §四。
 
+**与 HANDOFF-M6 措辞的两处差异（写入留档，免得读者去猜）**：
+
+* HANDOFF 写的是"源码 **zip**"，实际产出是 **`.tar.gz`**（`git archive --format=tar` + `gzip -9n`）。
+  理由：这两步的确定性来源简单且已实测（commit 时间戳 + `-n` 不写文件名/时间戳 → 同 tag 重复构建
+  **逐字节一致**）；zip 形态要额外固定 `date_time` 与 `external_attr` 才能达到同等可复算性。
+  命令语义等价、目标（"手工上传、本地可复算、与 tag 树同源"）不变；
+* **仓库内不放该二进制的耐久副本**：它是 Release 附件（永久可下载、带 digest 可复验），
+  再进一次 git 只会让仓库多一份 ~300 KB 的二进制、并牵动二进制属性与台账；
+  `plan/00-README总览.md` §三 的措辞已同步为"留档登记 + 门可复验"，不再承诺"仓库内耐久副本"。
+
 **提交面脱敏（发布前置，四步之外单独核）**
 
 | 面 | 事实 |
@@ -139,6 +149,9 @@ artifact: session-to-regression-0.1.0.tar.gz
 
 ### 4.1 附件与 tag
 
+* **Release URL**：`https://github.com/yuluo554/session-to-regression/releases/tag/v0.1.0`
+  （`isDraft=false`；本文件也是 Release 正文的来源——`gh release create … --notes-file plan/RELEASE-M6.md`，
+  正文是 tag 时点的那一版，本节内容不回灌正文）
 * 产物：`session-to-regression-0.1.0.tar.gz`，**311564 字节**（含 `data/bench/**`）
 * sha256（由 `sha256sum` 输出直接重定向生成，人只写注释行）：
 

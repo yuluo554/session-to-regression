@@ -1,5 +1,9 @@
 # HANDOFF-M6（下一棒：发布三件套）
 
+> **终版收官标注（2026-10-18）**：M6 已发布完成，**本系列到此收官、不再有 `HANDOFF-M7`**——
+> 收官声明与 DoD 逐项证据见本文件 **§七**；发布留档兼完结档见 [RELEASE-M6.md](RELEASE-M6.md)。
+> 本文件顶部的"下一棒"措辞是 tag 时点的原貌，按"快照不追改"约定保留。
+
 > 由 M5（RED/GREEN 隔离验证 + manifest + 交付收尾，2026-10-17）交出。**本文件是下一棒的唯一入口**：
 > 新对话零上下文，上下文全在这里与 `plan/`、`data/`、`README.md`、`docs/技术报告.md` 里。
 > 用法（新对话第一条）：`/goal 读取 "<项目绝对路径>/plan/HANDOFF-M6.md" 继续完成任务`
@@ -114,19 +118,22 @@ M4 骨架生成 ✅、M5 RED/GREEN 隔离验证 + manifest + 技术报告 ✅**
 
 ---
 
-## 五、DoD 逐项 checklist（M6）
+## 五、DoD 逐项 checklist（M6 · **终版收官已逐项打勾**）
 
-- [ ] `scripts/check_release.py` 落地并**无 FAIL**（六项检查逐条列出结论）
-- [ ] `plan/RELEASE-M6.md` 写好（**在 tag 之前**）并进入 tag 树
-- [ ] `git tag -a`（annotated；tagger 邮箱为 noreply）
-- [ ] **GitHub Release 附产物**：手工上传源码 zip；本地留同名副本 + sha256 留档；**不以 zipball 替代**
-- [ ] 发布物本体复核：真下载 + 中立目录解压 + `s2r selftest` / `config path` / 一条 `run` 演示；附件与 tag 树 sha256 同源
-- [ ] 隐私四层审计逐层留档（源码 import / 发布产物扫描 / socket 拦截动态 / 加载面静态）
-- [ ] 提交面脱敏：作者/提交者/tag tagger 邮箱零真实值；入库文本零本机路径形态
-- [ ] README / topic / description 与定位一致；README 顶部状态行改为"已发布"并给链接
-- [ ] `plan/00` §一/§三/§七、`plan/06` M6 段与状态表、`plan/07` §一第 6 行回写
-- [ ] tag 后事实（附件 sha256 / 下载复核 / Release URL）作为**追加提交**分栏记录
-- [ ] **本对话内写完 `plan/HANDOFF-M7.md`（若还有下一棒）或在本文件尾部记明"旅程结束"** → commit
+> **时点说明**：本节在 **tag 树里是空框版本**（tag 时这些事实还没发生）；M6 收官时在本文件（`main`）逐项
+> 打勾——这条"tag 树空框 vs main 已勾"的差异按纪律登记在 [RELEASE-M6.md](RELEASE-M6.md) §四，不迁 tag。
+
+- [x] `scripts/check_release.py` 落地并**无 FAIL**（六项检查逐条列出结论）→ 离线 **6 PASS / 0 FAIL**（网络类 4 项报 SKIP）；发布态 `--online` **13 PASS / 0 FAIL / 0 SKIP**；干净 clone 里同样 0 FAIL
+- [x] `plan/RELEASE-M6.md` 写好（**在 tag 之前**）并进入 tag 树 → 提交 `e8b92a7` 落盘；`git cat-file -e v0.1.0:plan/RELEASE-M6.md` 通过，且该版本 §四 为占位（tag 后追加）
+- [x] `git tag -a`（annotated；tagger 邮箱为 noreply）→ `v0.1.0` = tag 对象 `b1cae60…`，指向 `93e2aae`；tag push run `39083675618` 4 腿绿
+- [x] **GitHub Release 附产物**：手工上传源码包；本地留同名副本 + sha256 留档；**不以 zipball 替代** → 附件 `session-to-regression-0.1.0.tar.gz`（311564 B，sha256 `f7dec59e…c43760c`）+ `SHA256SUMS`；两次独立构建逐字节一致（形态用 `.tar.gz` 而非 zip，差异与理由见 [RELEASE-M6.md](RELEASE-M6.md) §一）
+- [x] 发布物本体复核：真下载 + 中立目录解压 + `s2r selftest` / `config path` / 一条 `run` 演示；附件与 tag 树同源 → `sha256sum -c` OK、`cmp` 一致、解包树 vs `git archive v0.1.0` `diff -r` **零差异**（103 文件）、三项命令全通
+- [x] 隐私四层审计逐层留档（源码 import / 发布产物扫描 / socket 拦截动态 / 加载面静态）→ [RELEASE-M6.md](RELEASE-M6.md) §三；产物解包树重扫同样干净（§4.2 第 9 行）
+- [x] 提交面脱敏：作者/提交者/tag tagger 邮箱零真实值；入库文本零本机路径形态 → `git log --format='%ae %ce' --all` 单一 noreply 值；tagger 邮箱**本地核**为 noreply 形态（CI 会把标注 tag 改写掉，那里看到的空值不是证据）
+- [x] README / topic / description 与定位一致；README 顶部状态行改为"已发布"并给链接 → 回读 `visibility=PUBLIC`、topics 六项、description 与 README 首段同源
+- [x] `plan/00` §一/§三/§五/§七、`plan/06` M6 段与状态表、`plan/07` §一第 6 行与 D6/决策表/K32 回写 → 各文件对应章节
+- [x] tag 后事实（附件 sha256 / 下载复核 / Release URL / CI 对账 / 可见性与匿名复核）作为**追加提交**分栏记录 → 提交 `68d88e3`，[RELEASE-M6.md](RELEASE-M6.md) §四
+- [x] **本对话内写完 `plan/HANDOFF-M7.md`（若还有下一棒）或在本文件尾部记明"旅程结束"** → 见本文件 §七（M6 是最后一棒，无 M7）
 
 ---
 
