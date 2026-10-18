@@ -71,7 +71,22 @@ artifact: session-to-regression-0.1.0.tar.gz
 | 8 | `python scripts/check_release.py`（离线） | 0 | ✅ 符合：**6 项检查全 PASS**、4 项网络类按设计报 **SKIP**（离线不冒充 PASS） |
 | 9 | 隐私四层审计探针（`privacy_audit_m6.py`，仓库树外） | 0 | ✅ 符合：四层读数见 §三 |
 
-### 2.1 发布门（`scripts/check_release.py`）的形态与边界
+### 2.1 干净 clone 复核（`git clone --no-local`，仓库树外）+ 安装面
+
+本轮改了版本号、动了 `tests/` 与 `tools/`、新增 `scripts/`，所以干净 clone 是"跟踪树本身可跑通"的
+唯一证据（逐条表另见 [verify/README.md](verify/README.md) §M6.3）：
+
+| 命令（clone 目录内） | 退出码 | 语义判定 |
+|---|---|---|
+| `tools/gen_bench.py --check` | 0 | ✅ 再生成**逐字节一致**（10 样本）——`data/bench/**` 的 `-text` 冻结在克隆里仍生效 |
+| `s2r bench` | 0 | ✅ `ok`（10/10、误报 0） |
+| `pytest -q` | 0 | ✅ **353 项通过**（与作者机器同收集数） |
+| `scripts/check_release.py`（离线） | 0 | ✅ **0 FAIL / 6 PASS / 4 SKIP**——发布门在干净 clone 里自足（不依赖已安装的包） |
+| `s2r run --target <树外目录> …` | 0 | ✅ 9 会话 → 8 条结论（verified 2 / unverified 1 / needs_manual 5），写出 2 个测试 + manifest；**clone 内 `git status` 干净** |
+| `tools/fix_eol.py --check` | 0 | ✅ 103 个文件 0 问题 |
+| 非 editable 安装 + **中立 CWD**：`pip install --no-build-isolation --no-deps --target <树外>` → `s2r selftest` / `config path` / `--version` | 0 | ✅ 安装面里有 `s2r/resources/scoring.toml`（安装面第五面）；自检 6 项全 ok、`config path` 指向随包副本、`s2r 0.1.0 (python 3.8.8)` |
+
+### 2.2 发布门（`scripts/check_release.py`）的形态与边界
 
 * **离线 6 项**：`version`（四处一致）/ `readme`（extras·命令·退出码·许可·包布局·运行期数据六面 + 附件名
   双向）/ `ledger`（27 份冻结件 sha256 逐份一致）/ `paths`（82 个入库文本 0 处本机路径形态）/
@@ -85,7 +100,9 @@ artifact: session-to-regression-0.1.0.tar.gz
 * **门自己也是代码**，三条运行时形态各有一条测试：① 结果清单是模块级的 → 入口 `clear()`
   （否则同进程连调两次"越跑越绿"）；② 离线网络项报 SKIP 且与 PASS **分离计数**；③ 检查项名成集合、
   逐项恰好一条结论。另有 **6 组变异验证**（见 [verify/README.md](verify/README.md) §M6.2）：
-  每组的"检查项数"与"变异组数"逐条对账。
+  **6/6 红、6/6 还原后回绿**，每组的"检查项数"与"变异组数"逐条对账——预期变红集合是**显式声明**的
+  （改跟踪文件必然连带 `worktree`；留档不在位会连带 `version`/`readme`，三条检查都消费同一份机读
+  事实块，属**有意的因果依赖**而非张冠李戴）。
 
 ---
 

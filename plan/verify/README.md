@@ -450,3 +450,84 @@ N1–N8（模板空转 / 候选断言不落骨架 / 探活假门 / 生成对账�
 | `py -3.8 -X utf8 tools/fix_eol.py --check` | 0 | ✅ 符合：99 个文件 0 问题 |
 | `PYTHONPATH=src py -3.12 -X utf8 -m s2r selftest` | 0 | ✅ 符合：口径文件在 clone 内定位成功、自检项全 ok |
 | 逐文件字节扫描 `\r\n`（99 个文本文件） | 0 | ✅ 符合：**零命中**（本轮连 `.pytest_cache` 都还没生成——`--force` 重生成与提交都保持了 LF） |
+
+---
+
+## M6（2026-10-18）发布：门禁 / 变异 / 干净 clone / 四层审计
+
+> **本轮新增的交付物**：`scripts/check_release.py`（发布门，离线 6 项 + `--online`）、
+> `tools/path_forms.py`（路径形态判据与扫描面**单点实现**，两处消费）、`plan/RELEASE-M6.md`（发布留档）、
+> `tests/test_check_release.py`（门的三条运行时形态）。
+> **版本口径本轮升 `0.1.0`**（`__version__` ↔ pyproject 动态版本 ↔ tag ↔ README 状态行四处一致）。
+
+### M6.1 逐条命令与退出码语义（本机实跑）
+
+| # | 命令 | 退出码 | 语义判定 |
+|---|---|---|---|
+| 1 | `py -3.8 -X utf8 -m pytest -q` | 0 | ✅ 符合：**353 项通过**（M5 时 348；新增发布门 4 项 + 隐私门扫描面自证 1 项） |
+| 2 | `py -3.12 -X utf8 -m pytest -q` | 0 | ✅ 符合：**353 项通过**（同收集数） |
+| 3 | `py -3.8/-3.12 -X utf8 tools/fix_eol.py --check` | 0 | ✅ 符合：**103 个文件 0 问题**（两解释器各跑一遍） |
+| 4 | `py -3.8 -X utf8 tools/gen_bench.py --check` | 0 | ✅ 符合：语料/真值/磁盘夹具再生成**逐字节一致**（10 样本，rng_draws=5） |
+| 5 | `tools/ci_smoke.py`（`.venv-check` 环境，editable 已重装、`s2r` 在 PATH） | 0 | ✅ 符合：**20/20**（六条业务命令 bare + module 两形态 + `--version`/`selftest`/`config`×2） |
+| 6 | `s2r bench` | 0 | ✅ 符合：`ok`（检出 **10/10**、误报 0）；`pending_facts` 空表 |
+| 7 | `s2r bench --probe <九个探活>` | 0 ×9 | ✅ 符合：九个注入缺陷**全部被检出** |
+| 8 | `python scripts/check_release.py`（离线，**提交后的树**） | 0 | ✅ 符合：**6 PASS / 0 FAIL / 4 SKIP**（网络类离线报 SKIP，不冒充 PASS；未提交时 `worktree` 项会报 FAIL——那正是它的语义） |
+
+### M6.2 变异验证（发布门 6 组：检查项数 ↔ 变异组数逐条对账）
+
+跑批脚本在仓库树外（`%TEMP%/s2r-mutations/mutate_m6.py`：备份 → 改 → 跑门 → 还原后必须回到 0 FAIL）。
+**预期变红集合是显式声明的**（改跟踪文件必然连带 `worktree`；留档不在位会连带 `version`/`readme`——
+三条检查都消费同一份机读事实块，是**有意的因果依赖**，不是张冠李戴）：
+
+| 变异 | 预期变红的检查项 | 实测 | 结果 |
+|---|---|---|---|
+| M6-1 `__version__` 改成 9.9.9 | `version` + `worktree` | 同 | RED ✅ |
+| M6-2 README extras 与 pyproject 不一致 | `readme` + `worktree` | 同 | RED ✅ |
+| M6-3 冻结真值改一个字节 | `ledger` + `worktree` | 同 | RED ✅ |
+| M6-4 入库文本混进本机路径形态（形态运行时拼装） | `paths` + `worktree` | 同 | RED ✅ |
+| M6-5 未跟踪产物 | `worktree` | 同 | RED ✅ |
+| M6-6 发布留档不在位 | `readme` + `release_doc` + `version` + `worktree` | 同 | RED ✅ |
+
+**6/6 红、6/6 还原后回绿**，且跑批结束后 `git status` 干净（变异没留下痕迹）。
+另有三条**运行时形态**由 `tests/test_check_release.py` 常驻守（结果清单入口 `clear()`、
+离线报 SKIP 且与 PASS 分离计数、检查项名成集合逐项一条结论）——"门越跑越绿"这类缺陷
+（模块级结果清单忘清空）正是靠"连调两次条数不变"抓的。
+
+### M6.3 干净 clone 复核 + 安装面 + 全链路演示（`git clone --no-local`，仓库树外）
+
+判据重点：本轮**改了版本号、动了 `tests/` 与 `tools/`、新增 `scripts/`** —— 干净 clone 是
+"跟踪树本身可跑通"的唯一证据；`data/bench/**` 的 `-text` 冻结也在这轮再验一次。
+
+| 命令（clone 目录内） | 退出码 | 语义判定 |
+|---|---|---|
+| `py -3.8 -X utf8 tools/gen_bench.py --check` | 0 | ✅ 符合：再生成**逐字节一致**（10 样本）——`-text` 冻结在克隆里仍生效 |
+| `PYTHONPATH=src py -3.8 -X utf8 -m s2r bench` | 0 | ✅ 符合：`ok`（10/10、误报 0） |
+| `py -3.8 -X utf8 -m pytest -q` | 0 | ✅ 符合：**353 项通过**（与作者机器同收集数） |
+| `py -3.8 -X utf8 scripts/check_release.py` | 0 | ✅ 符合：**0 FAIL / 6 PASS / 4 SKIP**（发布门在干净 clone 里也自足：不依赖已安装的包，自己把 `src` 放最前） |
+| `PYTHONPATH=src py -3.8 -X utf8 -m s2r run --target <树外目录> --claude-root data/bench/claude --codex-root data/bench/codex` | 0 | ✅ 符合：9 会话 → 8 条结论（verified 2 / unverified 1 / needs_manual 5），写出 2 个测试 + manifest；产物全在树外，**clone 内 `git status` 干净** |
+| `py -3.8 -X utf8 tools/fix_eol.py --check` | 0 | ✅ 符合：103 个文件 0 问题 |
+| 非 editable 安装：`pip install --no-build-isolation --no-deps --target <树外目标>` + **中立 CWD** 跑 `selftest` / `config path` / `--version` | 0 | ✅ 符合：安装面里**有** `s2r/resources/scoring.toml`（安装面第五面）；自检 6 项全 ok、`config path` 指向随包副本、`s2r 0.1.0 (python 3.8.8)` |
+
+### M6.4 隐私四层审计（"纯本地、零上传"的措辞与审计范围对齐）
+
+探针在仓库树外（`%TEMP%/s2r-mutations/privacy_audit_m6.py`），**逐层打印可核对的读数**：
+
+| 层 | 读数 |
+|---|---|
+| ① 源码 import 面 | `src/**/*.py` 19 个文件，网络能力导入 **0** 处 |
+| ② 发布产物扫描 | 55 个 `.py` / 77 个文本文件；禁用导入 0、调用面模式 0、`src/` 内 URL 字面量 0；**advisory 4 条**（TOML 解析器的非法值夹具、HN 出处 ×2、HANDOFF 里的镜像地址）——判据**按位置分流**，advisory 只报不阻断 |
+| ③ socket 拦截动态 | 把 `socket.socket`/`create_connection`/`getaddrinfo` 换成计数+抛异常的桩后跑**全链路** `run`：**exit 0、阻断尝试 0 次** |
+| ④ 加载面静态 | ③ 之后 `sys.modules` 分类：本项目 18 / 标准库 85 / 第三方 7；**本项目文件 0 处网络模式**；唯一落在标准库 `socket.py` 自身（它定义 `getaddrinfo`）——**加载面能力 ≠ 调用面行为**，如实登记不混写 |
+
+探针的目录剪枝按**特征**（`.venv*` 前缀 / `.egg-info` 后缀）而非精确名字——本项目的隔离环境叫
+`.venv-check/`，按精确名匹配会把整个 site-packages 扫进扫描面（这类误报会让门被关掉）。
+
+### M6.5 与 CI 的缺口（诚实标注）
+
+* **GitHub Actions 本轮首次运行**（M6 建仓首推）→ 首推之前的结论仍是"本地等价校验，未接远端，
+  CI 待首推验证"；首推后的真实 run 结论按事实**追加**登记在 `plan/RELEASE-M6.md` §四，不改写历史措辞。
+* **本轮新增缺口（本机测不了，显式待首推验证）**：① 门与探针只在 Windows + 3.8/3.12 上跑过，
+  Linux 腿的 `git status --porcelain` 引号形态（中文文件名）与 `shutil.which("gh")` 形态未实测；
+  ② `scripts/check_release.py --online` 依赖 `gh` 与网络，本机在**发布时**才第一次真跑；
+  ③ CI 检出形态会把**标注 tag 对象**改写掉 → `--online` 的 tag 形态检查在 CI 里看到的可能是轻量 tag，
+  故 `tagger 邮箱` 一栏在留档里标注为"**本地核**"（不把 CI 的空值当证据）。
