@@ -1,8 +1,12 @@
 name: ci
 
 # 说明（写给第一次看这个文件的人）：
-# * 四腿矩阵 = 2 平台 × 2 解释器（3.8 是项目底线）。ubuntu 的 3.8 钉在 22.04 上——
-#   新镜像对 3.8 的支持不稳定，而"平台差异"与"接线缺陷"必须能区分开（后者才是我们的问题）。
+# * **两腿矩阵** = 2 平台 × 1 解释器（`3.12` 是项目底线，与 pyproject 的 `requires-python` 同一口径）。
+#   为什么不再拉第二根解释器线：3.8 于 2024-10-07 EOL、3.9 于 2025-10-31、3.10 于 2026-10-01 EOL
+#   （endoflife.date，2026-10-20 取），继续把老版本放进矩阵只是"能跑"，不是"受支持"；
+#   3.12 的 EOL 是 2028-10-31，这条口径到 2028 之前不用再动。
+#   随之**撤掉 `ubuntu-22.04` 那个钉**：它唯一的理由是"新镜像对 3.8 支持不稳"（见 plan/07 的 D5），
+#   3.8 下线后这个理由不再成立；两条平台腿都用 `-latest`，"平台差异"与"接线缺陷"照样分得开。
 # * 所有断言都落成 tools/ 下的脚本或 pytest，**不写内联 shell**：内联脚本受 shell/缩进/行尾影响，
 #   本机无法复跑，而脚本形态可以（`python tools/ci_smoke.py` 就是本机同一条命令）。
 # * PYTHONUTF8=1 是编码加固的第三层（第一层在程序入口 reconfigure，第二层在子进程显式 encoding）。
@@ -23,14 +27,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-22.04, python: "3.8" }
           - { os: ubuntu-latest, python: "3.12" }
-          - { os: windows-latest, python: "3.8" }
           - { os: windows-latest, python: "3.12" }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
 

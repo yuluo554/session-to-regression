@@ -11,8 +11,9 @@
 
 [![ci](https://github.com/yuluo554/session-to-regression/actions/workflows/ci.yml/badge.svg)](https://github.com/yuluo554/session-to-regression/actions/workflows/ci.yml)
 
-**状态（2026-10-18）**：**v0.1.0 已发布** —— [Release](https://github.com/yuluo554/session-to-regression/releases/tag/v0.1.0)（源码包 + 校验值；
-发布留档见 [`plan/RELEASE-M6.md`](plan/RELEASE-M6.md)）。M1（双 harness 读取器）+ M2（episode 切分）
+**状态（2026-10-20）**：**v0.1.1 已发布** —— [Release](https://github.com/yuluo554/session-to-regression/releases/tag/v0.1.1)（源码包 + 校验值；
+发布留档见 [`plan/RELEASE-v0.1.1.md`](plan/RELEASE-v0.1.1.md)；v0.1.0 的留档原样保留在
+[`plan/RELEASE-M6.md`](plan/RELEASE-M6.md)）。M1（双 harness 读取器）+ M2（episode 切分）
 + M3（差分还原）+ M4（pytest 骨架生成）+ M5（RED/GREEN 隔离验证 + manifest）+ M6（发布）全部交付：
 读本机日志、按 `payload.type` 归一事件流、切出"报 bug → 失败 → 改文件"的 episode 并确定性打分过滤、
 把每次修复的 before/after 从日志里还原出来（三级降级 + 逐文件置信度）、生成一份带证据锚点与候选断言的
@@ -30,23 +31,23 @@ cd session-to-regression
 pip install -e ".[dev]"     # dev 是唯一 extras（pytest），CI 与本文档使用同一集合
 ```
 
-要求 Python ≥ 3.8，运行期**零第三方依赖**（TOML 口径文件由内置的严格子集读取器解析）。
+要求 Python ≥ 3.12，运行期**零第三方依赖**（TOML 口径文件由内置的严格子集读取器解析）。
 
 ## 下载即用（Release 附件）
 
-Release 附件是**手工打出的源码包** `session-to-regression-0.1.0.tar.gz`（含合成语料 `data/bench/**`，
+Release 附件是**手工打出的源码包** `session-to-regression-0.1.1.tar.gz`（含合成语料 `data/bench/**`，
 解包后无需额外下载即可跑全部命令与基准），另有伴随清单 `SHA256SUMS`：
 
 ```bash
-# 校验（两条命令都在**下载目录**里执行；哈希值见 plan/RELEASE-M6.md §四「tag 后追加事实」）
+# 校验（两条命令都在**下载目录**里执行；sha256 的唯一登记处就是这条清单本身）
 sha256sum -c SHA256SUMS
-tar -xzf session-to-regression-0.1.0.tar.gz && cd session-to-regression-0.1.0
+tar -xzf session-to-regression-0.1.1.tar.gz && cd session-to-regression-0.1.1
 pip install -e ".[dev]"
 s2r selftest && s2r bench          # 自检 + 合成基准（检出 10/10、误报 0）
 ```
 
 附件名以**这里写的名字**为准（由打包命令决定，不是从包名推导出来的）；附件与 tag 树**逐字节同源**
-（复核方式见 `plan/RELEASE-M6.md`）。
+（复核方式见 `plan/RELEASE-v0.1.1.md` §四）。
 
 ## 三分钟演示（当前可用）
 
@@ -155,7 +156,7 @@ assert 段是占位 + **候选断言**。三条纪律：
 | 0 | 成功；对 `run` / `verify` 表示「至少一条 verified」；对 `reconstruct` 表示「至少一个文件给出完整 before/after」；对 `generate` 表示「至少一份含候选断言的骨架」 |
 | 1 | 未达标：无 verified（含全部 unverified / needs_manual）、基准未达标、`scan` 读到文件但零事件、`selftest` 自检失败、`reconstruct` 一个完整 before/after 都没有（全为片段/无法定位/无 before 镜像）、`generate` 一份骨架都没推出来（符号识别不到/推不出候选断言/还原状态不是 ok） |
 | 2 | 用法错误或输入不可用：未知子命令、参数错误、路径不存在、未知日志格式（`unsupported_format`）、认不出的 episode 引用、缺落点（既没给 `--repo` 也没给 `--out-dir` / `--target`） |
-| 3 | 运行依赖缺失（如 pytest 不可用）——**不会**退化成「零条结果 + exit 0」；`verify` / `run` / `bench` 的验证面都需要 pytest |
+| 3 | 运行依赖缺失（如 pytest 不可用）——**不会**退化成「零条结果 + exit 0」；`selftest` 与 `verify` / `run` / `bench` 的验证面都需要 pytest |
 
 判断"跑挂了"与"按契约返回非 0"的区别：以本表为准，非 0 不必然是故障
 （`run` 检出全部 `unverified` 时返回 1 就是既定语义）。
@@ -179,8 +180,9 @@ assert 段是占位 + **候选断言**。三条纪律：
 * 生成物只写目标仓库的测试目录与临时副本，**不修改用户源码、不碰 git 索引**。
 
 "零上传"不是一句话，而是**四层审计**逐层可核验的结论（① 源码 import 面 / ② 发布产物扫描 /
-③ socket 拦截下的全链路动态运行 / ④ 实际加载面静态扫描，逐层读数见
-[`plan/RELEASE-M6.md`](plan/RELEASE-M6.md) §三）。
+③ socket 拦截下的全链路动态运行 / ④ 实际加载面静态扫描；逐层读数在
+[`plan/RELEASE-M6.md`](plan/RELEASE-M6.md) §三（v0.1.0 时点留档，v0.1.1 未重跑该四层——
+本轮没有触碰出网面，如实声明见 [`plan/RELEASE-v0.1.1.md`](plan/RELEASE-v0.1.1.md) §三）。
 
 ## 合成基准（`data/bench`）
 
@@ -236,7 +238,7 @@ assert 段是占位 + **候选断言**。三条纪律：
 ## 开发
 
 ```bash
-pytest -q                      # 单元与契约测试（双解释器：3.8 与 3.12 都应全绿）
+pytest -q                      # 单元与契约测试（下限 3.12：CI 两平台腿都是 3.12）
 python tools/ci_smoke.py       # 离线 CI 冒烟：逐条跑已交付命令 + 断言退出码语义
 python tools/gen_bench.py --check   # 基准语料再生成位级一致
 python tools/fix_eol.py --check     # 行尾/结尾换行卫生（CI 同款门）

@@ -6,9 +6,15 @@
 
 from __future__ import annotations
 
+import subprocess
+from pathlib import Path
+
 from _tools import load_tool
 
 FIX_EOL = load_tool("fix_eol")
+
+#: 只允许作为**构建生成物**出现的文件名（sdist 根由 setuptools 写在打包机上，可能带 CRLF）。
+BUILD_METADATA_NAMES = ("PKG-INFO", "setup.cfg")
 
 
 def test_clean_bytes_have_no_problems():
@@ -62,3 +68,20 @@ def test_iter_text_files_skips_binaries_and_keeps_stable_order(tmp_path):
 def test_iter_text_files_scans_the_repository(repo_root):
     names = {path.name for path in FIX_EOL.iter_text_files(repo_root)}
     assert {"pyproject.toml", "README.md", "scoring.toml", "ci_smoke.py"} <= names
+
+
+def test_build_metadata_skips_do_not_hide_tracked_source(repo_root, tmp_path):
+    """`PKG-INFO` / `setup.cfg` 被跳过**只对构建生成物成立**（sdist 根由 setuptools 写）。
+
+    守卫（反开后门）：本仓**跟踪**文件里不得存在这两个名字——否则"跳过构建元数据"就变成了
+    "让门看不见源码"。`git` 不可用（发布物形态）时这条守卫无从判定，如实说明而不是假装通过。
+    """
+    for name in BUILD_METADATA_NAMES:
+        assert FIX_EOL.is_skipped(tmp_path / name), "{} 应被跳过（构建生成物）".format(name)
+    if not (repo_root / ".git").exists():
+        return
+    tracked = subprocess.run(
+        ["git", "ls-files"], cwd=str(repo_root), stdout=subprocess.PIPE, encoding="utf-8", errors="replace"
+    ).stdout.split("\n")
+    offenders = [path for path in tracked if path.strip() and Path(path.strip()).name in BUILD_METADATA_NAMES]
+    assert not offenders, "被跟踪的源码里出现了只该由构建生成的名字: {}".format(offenders)

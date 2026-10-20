@@ -39,6 +39,11 @@ SKIP_DIRS = frozenset(
         ".idea",
         ".vscode",
         "node_modules",
+        #: 二次迭代交接目录（`update/`：诊断报告 / 路线 / 执行记录）——本机工作物，不入版本控制。
+        #: **判据**：加在这里必须同时进 `.gitignore`（已加）；只让门看不见、却仍可能被提交 = 开后门。
+        #: 这里加目录名（而不是改正则）是刻意的：扫描面与脱敏判据都是单点实现（见 `tools/path_forms.py`），
+        #: 改判据会同时影响测试与发布门，能"加目录名"就不要"改正则"。
+        "update",
     }
 )
 
@@ -52,7 +57,12 @@ SKIP_SUFFIXES = frozenset(
 #: （首推必红的形态之一）。构建元数据不是我们的源码，不该进门的扫描面。
 SKIP_DIR_SUFFIXES = (".egg-info", ".dist-info", ".eggs", ".venv", ".conda", ".pytest_cache", ".mypy_cache", ".ruff_cache")
 
-SKIP_NAMES = frozenset({"Thumbs.db", "Desktop.ini", ".DS_Store"})
+#: 按**文件名**跳过的构建产物：setuptools 打包时会往 **sdist 根**写 `PKG-INFO` 与 `setup.cfg`
+#: （本机 Windows 上实测为 CRLF），它们是**生成物、不是源码**。这与上面 `SKIP_DIR_SUFFIXES` 剪掉
+#: `*.egg-info/`（同一个 `PKG-INFO` 的另一种落点）是同一条语义的两种形态——**sdist 根那份**。
+#: 反开后门：`tests/test_text_integrity.py` 有一条守卫，断言本仓跟踪文件里不存在这两个名字
+#: （跳过只对生成物成立；一旦有人在仓库里放同名源码文件，守卫即红）。
+SKIP_NAMES = frozenset({"Thumbs.db", "Desktop.ini", ".DS_Store", "PKG-INFO", "setup.cfg"})
 
 #: 修改前先用这些特征判断是不是文本（含 NUL 即视为二进制）
 _BINARY_PROBE = b"\x00"

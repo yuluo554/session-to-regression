@@ -1,0 +1,27 @@
+# sdist 自足清单（D6）：`python -m build --sdist` 出来的源码包必须能**自己跑自己的全量测试**。
+#
+# 背景：setuptools 的默认 sdist 只保证"打 wheel 需要的东西 + 顶层元数据文件"，而本仓的测试面
+# 比安装面宽——`tests/` 依赖仓库根的 `tools/`（`_tools.load_tool`）、`scripts/`（发布门）、
+# `config/scoring.toml`（唯一数值口径的仓库权威副本）与 `data/bench/**`（合成语料 + 真值 +
+# 磁盘基线夹具）。缺了它们，从 sdist 解压后 `pytest -q` 必然红，而"装完能自证"这条门面就断了。
+#
+# 纪律：这里只列"测试与自证需要"的东西，不把工作物（`update/`、`build/`、
+# `*.egg-info` 一类）带进包——那些是 `.gitignore` 与 `tools/fix_eol.py` 的 SKIP_DIRS 一起挡住的。
+include README.md
+include LICENSE
+include pyproject.toml
+include .gitattributes
+# `.gitignore` 也要进包：`tests/test_privacy_gate.py` 断言"真实日志目录被屏蔽"，
+# 解压树里缺了它，从 sdist 跑测试就会红（不是"少了个可有可无的文件"）。
+include .gitignore
+
+# 测试面：测试、跑测试要用的工具与门、仓库根的口径文件、合成语料与真值
+recursive-include tests *.py
+recursive-include tools *.py
+recursive-include scripts *.py
+recursive-include config *
+recursive-include data *
+
+# 计划与文档留档（读者要能顺着 sdist 读到发布口径与数据台账）
+recursive-include plan *.md
+recursive-include docs *.md

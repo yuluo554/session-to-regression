@@ -6,11 +6,17 @@
 **两种模式**（都不改文件、不产生新事实）：
 
 * 离线（默认）：版本口径 / README 承诺与实物 / 冻结台账 sha256 / 入库文本零本机路径形态 /
-  工作区干净 / 发布留档在位且可机读。**发布之前这些本就应当全部能过**——所以它们也被
+  工作区干净 / **tag 陈旧度** / 发布留档在位且可机读。**发布之前这些本就应当全部能过**——所以它们也被
   `tests/test_check_release.py` 常驻守着（这一部分进 CI 是有信息量的）。
 * `--online`：追加走 `gh` 的远端检查（仓库可见性 / tag 对象形态与提交 / 该提交 CI 逐 job 绿 /
-  Release 非 draft / 远端附件集合与登记载荷一致 / 逐个附件下载回来重算 sha256 /
-  伴随清单恰好登记同一批载荷），并要求**发布留档不再有待登记项**。
+  Release 非 draft / 远端附件集合与登记载荷一致 / 逐个附件下载回来重算 sha256 并**与伴随清单
+  `SHA256SUMS`（digest 登记处）以及 GitHub 自报 digest 三方对撞** / 伴随清单恰好登记同一批载荷），
+  并要求**发布留档不再有待登记项**。
+
+**digest 的登记处是伴随清单，不是留档本身**（v0.1.1 起）：附件由 tag 树构建，而留档在 tag 树内——
+把载荷的 sha256 写进载荷里是**不动点型自指**（写进去就改变了它，无论多早开始算都放不进去）。
+所以留档只留"登记处是谁"这条指针（机读键 `digest_registry`）与不变量，**数值一律落在不进载荷的
+`SHA256SUMS` 里**；门在发布态要求该指针在位，并要求**留档内不得出现载荷自身的 digest 行**（那必然过期）。
 
 **刻意不进 CI 的是"发布终态"那一层**：它要求"事实已经发生"（tag 在、Release 在、附件可下载），
 发布之前必然红；把它挂进 CI 只会让 tag 之前的**正常**提交永远红、红得没有信息量。
@@ -47,12 +53,15 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-#: 发布留档的单文件载体（M6 三件套之③；它在 tag 之前就必须写好并进 tag 树）。
-RELEASE_DOC = "plan/RELEASE-M6.md"
+#: 发布留档的单文件载体（**当前版本**的那一份；它在 tag 之前就必须写好并进 tag 树）。
+#: 历史版本的留档不删（`plan/RELEASE-M6.md` 是 v0.1.0 的归档，原样保留）。
+RELEASE_DOC = "plan/RELEASE-v0.1.1.md"
 
 #: 机读事实块的起始标记与键名（"留档写的"与"门查的"必须同源：都从这里取）。
+#: `digest_registry` = **载荷 sha256 的登记处**（v0.1.1 起 = 伴随清单 `SHA256SUMS`）。
+#: 为什么不在留档里直接写数值：留档在 tag 树里、也就是**在载荷里**，写载荷自身的 sha256 是不动点型自指。
 FACTS_MARKER = "# release-facts"
-FACTS_KEYS = ("tag", "repo", "artifact")
+FACTS_KEYS = ("tag", "repo", "artifact", "digest_registry")
 
 #: 未发生事实的占位标记（发布态检查会要求它被填掉；离线时不判它——口径要求"不许预填"）。
 PLACEHOLDER_MARKER = "待登记"
@@ -72,15 +81,20 @@ REQUIRED_SECTIONS = (
 #: Release 附件名形态（README 提到的产物名必须真在登记表里；模式同时收 - 与 _ 两种拼写）。
 ARTIFACT_PATTERN = re.compile(r"session[-_]to[-_]regression-[A-Za-z0-9._-]+\.(?:tar\.gz|zip|whl)")
 
-#: "sha256: <hex>  <name>" 一行一产物（留档里的机读形态，读者一条命令就能复验）。
+#: "sha256: <hex>  <name>" 一行一产物。**只在 `SHA256SUMS`（登记处）与 `--artifacts-dir` 的本地
+#: 副本核对里使用**：留档本身在载荷内，写载荷自身的 digest 是不动点型自指（必然过期），
+#: 发布态会因此判 FAIL（见 `check_release_doc`）。
 DIGEST_LINE = re.compile(r"^sha256:\s*([0-9a-f]{64})\s+(\S+)\s*$", re.MULTILINE)
 
 #: 伴随清单 `SHA256SUMS` 用 **`sha256sum` 标准形态**（`<hex>  <name>`）——它要能被
 #: `sha256sum -c` 直接吃，所以与留档里的机读形态是两种文法、各有一条正则。
 SUMS_LINE = re.compile(r"^([0-9a-f]{64})[ \t]+\*?(\S+)\s*$", re.MULTILINE)
 
-#: 与脱敏判据同源（`tools/path_forms.py`）：入库文本零本机盘符/家目录形态。
+#: 伴随清单（digest 的**登记处**；与脱敏判据同源，见 `tools/path_forms.py`）。
 SUMS_ASSET = "SHA256SUMS"
+
+#: `digest_registry` 的合法取值：只有伴随清单这一处——进载荷的那份清单不可能登记载荷自身。
+REGISTRY_SUMS = SUMS_ASSET
 
 STATUS_PASS = "PASS"
 STATUS_FAIL = "FAIL"
@@ -377,6 +391,48 @@ def check_git_worktree(repo_root: Path) -> None:
         add("worktree", STATUS_PASS, "工作区干净（跟踪文件 {} 个、无未跟踪产物）".format(tracked_count))
 
 
+def check_tag_freshness(repo_root: Path, facts: Dict[str, str]) -> None:
+    """tag 指向的提交 vs 本地 HEAD 的**陈旧度**（"发布物是不是当前树的发布物"的唯一可见信号）。
+
+    **为什么是 WARN 不是 FAIL**：未发版时每个提交都会让 tag "落后"——设成 FAIL 会让正常开发
+    永远红、红得没有信息量（与"发布终态不进 CI"是同一条道理）。它的含义是**信息**：
+    这条 WARN 在时，Release 附件不是当前树的发布物（tag 之后落的修复，下载到包的人拿不到）。
+
+    **必须先剥壳拿到提交**：annotated tag 的 ref 指向 **tag 对象**，tag 对象的 sha 与提交不是一回事——
+    直接比会把 tag 对象与提交的差异读成"落后 1 个提交"（`--online` 的 `ci` 检查曾因同一形态
+    把"没扫到"报成"没跑过"）。
+    """
+    if not (repo_root / ".git").exists():
+        add("tag_freshness", STATUS_SKIP, "gitless: 这棵树没有 .git（源码包解压树里本就不适用）")
+        return
+    tag = facts.get("tag", "")
+    if not tag:
+        add("tag_freshness", STATUS_SKIP, "留档没登记 tag，跳过陈旧度检查")
+        return
+    code, out = _git(["rev-parse", "--verify", "refs/tags/{}^{{commit}}".format(tag)], repo_root)
+    if code != 0:
+        add("tag_freshness", STATUS_WARN, "本地没有可作为提交解析的 tag {}（未发版或未 fetch tag）".format(tag))
+        return
+    tag_commit = out.strip().split("\n")[-1].strip()
+    code, out = _git(["rev-list", "--count", "{}..HEAD".format(tag_commit)], repo_root)
+    if code != 0:
+        add("tag_freshness", STATUS_WARN, "git rev-list 失败: {}".format(out.strip()))
+        return
+    try:
+        behind = int(out.strip())
+    except ValueError:
+        add("tag_freshness", STATUS_WARN, "git rev-list 的输出不可解析: {}".format(out.strip()))
+        return
+    if behind > 0:
+        add(
+            "tag_freshness",
+            STATUS_WARN,
+            "{} 落后 HEAD {} 个提交（当前树里这些提交的修复不在发布物内）".format(tag, behind),
+        )
+    else:
+        add("tag_freshness", STATUS_PASS, "{} == HEAD（发布物与当前树同源，tag 提交 {}）".format(tag, tag_commit[:12]))
+
+
 def check_release_doc(repo_root: Path, artifacts_dir: Optional[Path], online: bool) -> None:
     """发布留档在位、机读块可解析、小节成标题存在；登了 digest 就与本地副本对账。"""
     doc_path = repo_root.joinpath(*RELEASE_DOC.split("/"))
@@ -391,30 +447,47 @@ def check_release_doc(repo_root: Path, artifacts_dir: Optional[Path], online: bo
         if section not in text:
             problems.append("缺小节标题: {}".format(section))
     artifacts = recorded_artifacts(facts)
-    digests = recorded_digests(text)
-    digest_source = "the append section" if digests else "not recorded yet"
+    registry = facts.get("digest_registry", "")
+    #: 留档在 tag 树里、也就是在载荷里 → 写载荷自身 digest 是不动点型自指。发布态要求
+    #: **留档只留"登记处是谁"这条指针**，数值一律落在不进载荷的 `SHA256SUMS` 里。
+    in_doc_digests = recorded_digests(text)
+    digest_source = "registry pointer: {}".format(registry) if registry else "not declared yet"
 
     if online:
-        if not digests:
-            problems.append("发布态要求每个产物都有 digest 行（sha256: <hex>  <name>）")
-        for name in artifacts:
-            if name not in digests:
-                problems.append("产物 {} 没有登记 digest（一个 digest 覆盖不了两个文件）".format(name))
+        if registry != REGISTRY_SUMS:
+            problems.append(
+                "发布态要求留档声明 digest 登记处（机读键 digest_registry = {}），当前 {}".format(
+                    REGISTRY_SUMS, registry or "缺"
+                )
+            )
+        if in_doc_digests:
+            problems.append(
+                "留档里出现了 digest 行（{}）——留档在载荷内，登记载荷自身 sha256 是不动点型自指，"
+                "数值必须落在伴随清单 {}".format(sorted(in_doc_digests), REGISTRY_SUMS)
+            )
         if PLACEHOLDER_MARKER in text:
             problems.append("发布态不许留占位标记: {}".format(PLACEHOLDER_MARKER))
 
     local_checked = 0
     if artifacts_dir is not None:
-        if not digests:
-            problems.append("给了 --artifacts-dir 但留档里没有 digest 可对账")
+        # 本地副本核对：digest 来自**登记处**（`SHA256SUMS` 随下载件一起放在同一目录），
+        # 而不是来自载荷内的留档。
+        sums_path = artifacts_dir / SUMS_ASSET
+        from_sums: Dict[str, str] = {}
+        if not sums_path.is_file():
+            problems.append("给了 --artifacts-dir 但目录里没有登记处 {} 可对账".format(SUMS_ASSET))
+        else:
+            from_sums = recorded_digests(sums_path.read_text(encoding="utf-8", errors="replace"), SUMS_LINE)
         for name in artifacts:
             path = artifacts_dir / name
             if not path.is_file():
                 problems.append("本地副本不存在: {}".format(path.name))
                 continue
             local_checked += 1
-            if name in digests and sha256_file(path) != digests[name]:
-                problems.append("{} 的 sha256 与留档登记值不一致".format(name))
+            if name not in from_sums:
+                problems.append("{}: 登记处 {} 没有它的 digest".format(name, SUMS_ASSET))
+            elif sha256_file(path) != from_sums[name]:
+                problems.append("{} 的 sha256 与登记处 {} 的值不一致".format(name, SUMS_ASSET))
 
     if problems:
         add("release_doc", STATUS_FAIL, " | ".join(problems))
@@ -422,7 +495,7 @@ def check_release_doc(repo_root: Path, artifacts_dir: Optional[Path], online: bo
         add(
             "release_doc",
             STATUS_PASS,
-            "{} 在位；产物 {} 个、digest 来源 {}（本地副本核对 {} 个）".format(
+            "{} 在位；产物 {} 个、digest {}（本地副本核对 {} 个）".format(
                 RELEASE_DOC, len(artifacts), digest_source, local_checked
             ),
         )
@@ -592,11 +665,20 @@ def check_release_assets(repo_root: Path, facts: Dict[str, str], tag: str) -> Op
     return assets
 
 
-def check_asset_bytes(repo_root: Path, facts: Dict[str, str], tag: str) -> None:
-    """逐附件真下载回来重算 sha256，并核对伴随清单恰好登记同一批载荷。"""
+def check_asset_bytes(repo_root: Path, facts: Dict[str, str], tag: str, assets: List[Dict[str, object]]) -> None:
+    """逐附件真下载回来重算 sha256，与登记处（伴随清单）以及 GitHub 自报 digest **三方对撞**。
+
+    三方 = ① 本地重算、② 伴随清单 `SHA256SUMS`（登记处，随下载件一起取回）、
+    ③ GitHub API 自报的 `asset.digest`（服务端算的，不由我们控制）。三者必须同值——
+    "下载回来的字节"与"远端登记的字节"不是一回事，只对其中两方就会漏掉"上传件被替换"。
+    """
     slug = facts.get("repo", "")
     artifacts = recorded_artifacts(facts)
-    recorded = recorded_digests(read_release_doc())
+    remote_digests: Dict[str, str] = {}
+    for asset in assets:
+        digest = str(asset.get("digest", "") or "")
+        if digest.startswith("sha256:"):
+            remote_digests[asset.get("name", "")] = digest.split(":", 1)[1]
     tmp = Path(tempfile.mkdtemp(prefix="s2r-release-assets-"))
     try:
         downloaded: Dict[str, Path] = {}
@@ -611,25 +693,34 @@ def check_asset_bytes(repo_root: Path, facts: Dict[str, str], tag: str) -> None:
                 return
             downloaded[name] = path
         problems: List[str] = []
-        for name in artifacts:
-            digest = sha256_file(downloaded[name])
-            if name not in recorded:
-                problems.append("{}: 留档没有登记它的 digest".format(name))
-            elif digest != recorded[name]:
-                problems.append("{}: 下载件 sha256 {} != 登记 {}".format(name, digest[:12], recorded[name][:12]))
-        sums = downloaded[SUMS_ASSET].read_text(encoding="utf-8", errors="replace")
-        from_sums = recorded_digests(sums, SUMS_LINE)
+        # 登记处 = 随下载件一起取回的伴随清单（留档在载荷内，不能登记载荷自身）。
+        from_sums = recorded_digests(
+            downloaded[SUMS_ASSET].read_text(encoding="utf-8", errors="replace"), SUMS_LINE
+        )
         if set(from_sums) != set(artifacts):
             problems.append("伴随清单登记的载荷集合与留档不同: {}".format(sorted(set(from_sums) ^ set(artifacts))))
-        for name, digest in from_sums.items():
-            if name in recorded and digest != recorded[name]:
-                problems.append("伴随清单里 {} 的 digest 与留档不一致".format(name))
-            if name in downloaded and sha256_file(downloaded[name]) != digest:
-                problems.append("伴随清单里 {} 的 digest 与实际下载件不符".format(name))
+        for name in artifacts:
+            local = sha256_file(downloaded[name])
+            if name not in from_sums:
+                problems.append("{}: 伴随清单（登记处）没有登记它的 digest".format(name))
+            elif local != from_sums[name]:
+                problems.append("{}: 下载件 sha256 {} != 伴随清单 {}".format(name, local[:12], from_sums[name][:12]))
+            if name in remote_digests and local != remote_digests[name]:
+                problems.append(
+                    "{}: 下载件 sha256 {} != GitHub 自报 digest {}".format(
+                        name, local[:12], remote_digests[name][:12]
+                    )
+                )
         if problems:
             add("assets", STATUS_FAIL, " | ".join(problems))
         else:
-            add("assets", STATUS_PASS, "{} 个载荷下载回来重算一致；伴随清单恰好登记同一批载荷".format(len(artifacts)))
+            add(
+                "assets",
+                STATUS_PASS,
+                "{} 个载荷下载回来重算一致（伴随清单 + GitHub digest 三方对撞）；清单恰好登记同一批载荷".format(
+                    len(artifacts)
+                ),
+            )
     finally:
         shutil.rmtree(str(tmp), ignore_errors=True)
 
@@ -685,14 +776,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     check_bench_ledger(repo_root)
     check_no_local_path_forms(repo_root)
     check_git_worktree(repo_root)
+    check_tag_freshness(repo_root, facts)
     check_release_doc(repo_root, Path(args.artifacts_dir).resolve() if args.artifacts_dir else None, args.online)
 
     if args.online:
         commit = check_remote(repo_root, facts, tag)
         check_ci(repo_root, facts, commit)
         if tag:
-            if check_release_assets(repo_root, facts, tag) is not None:
-                check_asset_bytes(repo_root, facts, tag)
+            assets = check_release_assets(repo_root, facts, tag)
+            if assets is not None:
+                check_asset_bytes(repo_root, facts, tag, assets)
         else:
             add("release", STATUS_SKIP, "留档没登记 tag，跳过附件检查")
     else:
